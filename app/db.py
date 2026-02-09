@@ -304,7 +304,7 @@ def create_account(
                 fixed_step, min_step_override, max_step_override, expires_at,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 username,
