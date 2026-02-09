@@ -1,7 +1,12 @@
 ﻿import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - fallback for older Python
+    ZoneInfo = None
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB_PATH = os.path.join(DATA_DIR, "mimotion.db")
@@ -24,8 +29,17 @@ DEFAULT_SETTINGS = {
 }
 
 
+def _beijing_tz():
+    if ZoneInfo is None:
+        return timezone(timedelta(hours=8))
+    try:
+        return ZoneInfo("Asia/Shanghai")
+    except Exception:
+        return timezone(timedelta(hours=8))
+
+
 def _now():
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(_beijing_tz()).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def ensure_data_dir():

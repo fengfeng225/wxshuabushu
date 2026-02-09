@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.crypto import decrypt_text
 from app.db import (
@@ -120,11 +120,11 @@ def _resolve_step_config(account, fixed_step_override=None, fixed_step_exact=Fal
 
 def _safe_timezone(name: str):
     if ZoneInfo is None:
-        return timezone.utc
+        return timezone(timedelta(hours=8))
     try:
-        return ZoneInfo(name)
+        return ZoneInfo("Asia/Shanghai")
     except Exception:
-        return timezone.utc
+        return timezone(timedelta(hours=8))
 
 
 def _parse_date(value: str):
@@ -248,7 +248,7 @@ def run(trigger="manual"):
         if trigger == "cron":
             accounts = _filter_expired_accounts(accounts, settings)
         if not accounts:
-            raise RuntimeError("No enabled accounts.")
+            return False
         if trigger == "cron":
             schedule = _build_spread_schedule(accounts, delay_window_seconds)
         else:

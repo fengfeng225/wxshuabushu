@@ -144,9 +144,15 @@ def _format_ts(value):
     raw = value.strip()
     try:
         if raw.endswith("Z"):
-            dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
+            dt = (
+                datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
+                .replace(tzinfo=timezone.utc)
+                .astimezone(_beijing_tz())
+            )
         else:
             dt = datetime.fromisoformat(raw.replace("Z", ""))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(_beijing_tz())
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return raw.replace("T", " ").replace("Z", "")
@@ -188,17 +194,23 @@ def _template_context(request: Request, **extra):
     return context
 
 
-def _safe_timezone(name: str):
+def _beijing_tz():
     if ZoneInfo is None:
-        return timezone.utc
+        return timezone(timedelta(hours=8))
     try:
-        return ZoneInfo(name)
+        return ZoneInfo("Asia/Shanghai")
     except Exception:
-        return timezone.utc
+        return timezone(timedelta(hours=8))
 
 
-def _to_utc_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _safe_timezone(name: str):
+    return _beijing_tz()
+
+
+def _to_bj_str(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_beijing_tz())
+    return value.astimezone(_beijing_tz()).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _today_range(tz_name: str):
@@ -206,7 +218,7 @@ def _today_range(tz_name: str):
     now = datetime.now(tz)
     start = datetime(now.year, now.month, now.day, tzinfo=tz)
     end = start + timedelta(days=1)
-    return _to_utc_iso(start), _to_utc_iso(end)
+    return _to_bj_str(start), _to_bj_str(end)
 
 
 def _today_date(tz_name: str):
