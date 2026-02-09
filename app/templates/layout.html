@@ -1,0 +1,402 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "枫枫步数修改" }}</title>
+    <link rel="icon" href="/static/favicon.svg?v={{ static_version }}" type="image/svg+xml" sizes="any">
+    <!-- <link rel="icon" href="/static/favicon.png?v={{ static_version }}" type="image/png" sizes="32x32">
+    <link rel="shortcut icon" href="/static/favicon.png?v={{ static_version }}" type="image/png"> -->
+    <link rel="stylesheet" href="/static/styles.css?v={{ static_version }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">枫枫步数修改</div>
+      <nav class="nav">
+        <a href="/">账号管理</a>
+        <a href="/settings">系统设置</a>
+        <a href="/logs">执行记录</a>
+        <button class="nav-button" type="button" data-action="logout">退出</button>
+      </nav>
+    </header>
+    <div class="message-container" id="messageContainer" aria-live="polite"></div>
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">枫枫步数修改</footer>
+    <div class="modal-mask" id="confirmMask" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <div class="modal-head">
+          <h3 class="modal-title" id="confirmTitle">确认操作</h3>
+        </div>
+        <div class="modal-body" id="confirmMessage">确定要继续吗？</div>
+        <div class="modal-footer">
+          <button class="button ghost" type="button" id="confirmCancel">取消</button>
+          <button class="button primary" type="button" id="confirmOk">确认</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-mask" id="testMask" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="testTitle">
+        <div class="modal-head">
+          <h3 class="modal-title" id="testTitle">测试步数</h3>
+        </div>
+        <form class="modal-form" method="post" id="testForm">
+          <div class="modal-body">
+            <div class="muted" id="testAccountLabel">指定账号执行测试。</div>
+            <label class="modal-label" for="testStep">步数</label>
+            <input
+              id="testStep"
+              name="step"
+              type="number"
+              min="0"
+              max="99999"
+              value="8000"
+              required
+            >
+            <div class="help">范围 0-99999，建议不要过大。</div>
+          </div>
+          <div class="modal-footer">
+            <button class="button ghost" type="button" id="testCancel">取消</button>
+            <button class="button primary" type="submit" id="testSubmit">提交</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div class="modal-mask" id="testResultMask" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="testResultTitle">
+        <div class="modal-head">
+          <h3 class="modal-title" id="testResultTitle">测试结果</h3>
+        </div>
+        <div class="modal-body">
+          <div class="result-row">
+            <span class="result-icon" id="testResultIcon">✓</span>
+            <span class="result-text" id="testResultText">修改成功</span>
+          </div>
+          <div class="result-detail" id="testResultDetail"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="button primary" type="button" id="testResultOk">确定</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const container = document.getElementById("messageContainer");
+        const icons = {
+          success: "✓",
+          error: "!",
+          warning: "!",
+          info: "i",
+        };
+
+        window.showMessage = (type, text, duration = 2200) => {
+          if (!container || !text) {
+            return;
+          }
+          const message = document.createElement("div");
+          const safeType = icons[type] ? type : "info";
+          message.className = `el-message el-message--${safeType}`;
+          const icon = document.createElement("span");
+          icon.className = "el-message__icon";
+          icon.textContent = icons[safeType];
+          const content = document.createElement("span");
+          content.className = "el-message__content";
+          content.textContent = text;
+          message.append(icon, content);
+          container.appendChild(message);
+          requestAnimationFrame(() => message.classList.add("show"));
+          window.setTimeout(() => {
+            message.classList.remove("show");
+            window.setTimeout(() => message.remove(), 200);
+          }, duration);
+        };
+      })();
+    </script>
+    <script>
+      (() => {
+        window.addEventListener("pageshow", (event) => {
+          if (event.persisted) {
+            window.location.reload();
+          }
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        const mask = document.getElementById("confirmMask");
+        const message = document.getElementById("confirmMessage");
+        const cancelBtn = document.getElementById("confirmCancel");
+        const okBtn = document.getElementById("confirmOk");
+        let resolver = null;
+
+        const close = (result) => {
+          if (!mask) {
+            return;
+          }
+          mask.classList.remove("open");
+          mask.setAttribute("aria-hidden", "true");
+          if (resolver) {
+            resolver(result);
+            resolver = null;
+          }
+        };
+
+        const open = (text) => {
+          if (!mask) {
+            return;
+          }
+          message.textContent = text || "确定要继续吗？";
+          mask.classList.add("open");
+          mask.setAttribute("aria-hidden", "false");
+        };
+
+        window.showConfirm = (text) => new Promise((resolve) => {
+          resolver = resolve;
+          open(text);
+        });
+
+        cancelBtn?.addEventListener("click", () => close(false));
+        okBtn?.addEventListener("click", () => close(true));
+        mask?.addEventListener("click", (event) => {
+          if (event.target === mask) {
+            close(false);
+          }
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            close(false);
+          }
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        const logoutBtn = document.querySelector('[data-action="logout"]');
+        if (!logoutBtn) {
+          return;
+        }
+        logoutBtn.addEventListener("click", async () => {
+          try {
+            const resp = await fetch("/logout", {
+              method: "GET",
+              credentials: "same-origin",
+              headers: { "X-Requested-With": "XMLHttpRequest" },
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data.ok) {
+              window.showMessage?.("success", data.message || "已退出登录");
+              const target = data.redirect || "/login";
+              window.setTimeout(() => {
+                window.location.href = target;
+              }, 600);
+            } else {
+              const detail = data.detail || data.message || "退出失败";
+              window.showMessage?.("error", detail);
+            }
+          } catch (err) {
+            window.showMessage?.("error", "网络异常，请稍后重试");
+          }
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        const mask = document.getElementById("testMask");
+        const form = document.getElementById("testForm");
+        const stepInput = document.getElementById("testStep");
+        const accountLabel = document.getElementById("testAccountLabel");
+        const cancelBtn = document.getElementById("testCancel");
+        const submitBtn = document.getElementById("testSubmit");
+        const resultMask = document.getElementById("testResultMask");
+        const resultTitle = document.getElementById("testResultTitle");
+        const resultIcon = document.getElementById("testResultIcon");
+        const resultText = document.getElementById("testResultText");
+        const resultDetail = document.getElementById("testResultDetail");
+        const resultOk = document.getElementById("testResultOk");
+
+        const close = () => {
+          if (!mask) {
+            return;
+          }
+          mask.classList.remove("open");
+          mask.setAttribute("aria-hidden", "true");
+        };
+
+        const open = (accountId, accountName) => {
+          if (!mask || !form) {
+            return;
+          }
+          form.setAttribute("action", `/accounts/${accountId}/test`);
+          if (accountLabel) {
+            accountLabel.textContent = `账号：${accountName || "-"}`;
+          }
+          if (stepInput) {
+            stepInput.value = "8000";
+            stepInput.focus();
+            try {
+              const len = stepInput.value.length;
+              if (stepInput.setSelectionRange) {
+                stepInput.setSelectionRange(len, len);
+              }
+            } catch (err) {
+              // Ignore selection errors on number inputs
+            }
+          }
+          mask.classList.add("open");
+          mask.setAttribute("aria-hidden", "false");
+        };
+
+        const closeResult = () => {
+          if (!resultMask) {
+            return;
+          }
+          resultMask.classList.remove("open");
+          resultMask.setAttribute("aria-hidden", "true");
+        };
+
+        const openResult = (ok, detail) => {
+          if (!resultMask) {
+            return;
+          }
+          if (resultTitle) {
+            resultTitle.textContent = ok ? "测试结果" : "测试结果";
+          }
+          if (resultIcon) {
+            resultIcon.textContent = ok ? "✓" : "!";
+            resultIcon.className = ok ? "result-icon success" : "result-icon fail";
+          }
+          if (resultText) {
+            resultText.textContent = ok ? "修改成功" : "修改失败";
+          }
+          if (resultDetail) {
+            resultDetail.textContent = ok ? "" : (detail || "执行失败");
+          }
+          resultMask.classList.add("open");
+          resultMask.setAttribute("aria-hidden", "false");
+        };
+
+        document.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          const trigger = target.closest("[data-test-account]");
+          if (!trigger) {
+            return;
+          }
+          const accountId = trigger.getAttribute("data-test-account");
+          const accountName = trigger.getAttribute("data-test-name");
+          if (accountId) {
+            event.preventDefault();
+            open(accountId, accountName);
+          }
+        });
+
+        cancelBtn?.addEventListener("click", close);
+        resultOk?.addEventListener("click", closeResult);
+
+        form?.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!form || !submitBtn) {
+            return;
+          }
+          const action = form.getAttribute("action") || "";
+          if (!action) {
+            return;
+          }
+          submitBtn.disabled = true;
+          submitBtn.classList.add("loading");
+          submitBtn.textContent = "提交中...";
+          try {
+            const payload = new FormData(form);
+            const resp = await fetch(action, {
+              method: "POST",
+              credentials: "same-origin",
+              body: payload,
+              headers: { "X-Requested-With": "XMLHttpRequest" },
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data.ok) {
+              close();
+              openResult(true, "");
+            } else {
+              const detail =
+                (data && (data.detail || data.message)) ||
+                "执行失败";
+              close();
+              openResult(false, detail);
+            }
+          } catch (err) {
+            close();
+            openResult(false, "网络异常，请稍后重试");
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove("loading");
+            submitBtn.textContent = "提交";
+          }
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        document.querySelectorAll(".switch").forEach((wrapper) => {
+          const input = wrapper.querySelector("input[type='checkbox']");
+          const label = wrapper.querySelector(".switch-text.dynamic");
+          if (!input || !label) {
+            return;
+          }
+          const update = () => {
+            const onText = label.getAttribute("data-on") || "";
+            const offText = label.getAttribute("data-off") || "";
+            label.textContent = input.checked ? onText : offText;
+            label.classList.toggle("on", input.checked);
+            label.classList.toggle("off", !input.checked);
+          };
+          input.addEventListener("change", update);
+          update();
+        });
+      })();
+    </script>
+    <script>
+      (() => {
+        const selectors = "input[type='text'], input[type='password'], input[type='number'], textarea";
+        document.querySelectorAll(selectors).forEach((field) => {
+          if (field.closest(".pagination-bar") || field.closest(".settings-form")) {
+            return;
+          }
+          if (field.classList.contains("no-clear")) {
+            return;
+          }
+          if (field.closest(".clearable-wrap")) {
+            return;
+          }
+          const wrapper = document.createElement("span");
+          wrapper.className = "clearable-wrap";
+          field.parentNode.insertBefore(wrapper, field);
+          wrapper.appendChild(field);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "clear-btn";
+          btn.setAttribute("aria-label", "清空");
+          btn.textContent = "x";
+          wrapper.appendChild(btn);
+
+          const update = () => {
+            const hasValue = !!field.value;
+            wrapper.classList.toggle("has-value", hasValue);
+          };
+          btn.addEventListener("click", () => {
+            field.value = "";
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+            field.dispatchEvent(new Event("change", { bubbles: true }));
+            update();
+            field.focus();
+          });
+          field.addEventListener("input", update);
+          update();
+        });
+      })();
+    </script>
+  </body>
+</html>

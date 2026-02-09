@@ -1,0 +1,295 @@
+﻿{% extends "layout.html" %}
+{% block content %}
+<form method="post" action="/settings" class="form settings-form">
+  <section class="bento-grid">
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <div>
+          <h1 class="card-title">默认步数设置</h1>
+        </div>
+      </div>
+      <div class="grid">
+        <label class="required-label">
+          <div>
+            <span>最小步数</span>
+            <span class="required">*</span>
+          </div>
+          <input type="number" name="min_step" value="{{ settings.min_step }}" required>
+        </label>
+        <label class="required-label">
+          <div>
+            <span>最大步数</span>
+            <span class="required">*</span>
+          </div>
+          <input type="number" name="max_step" value="{{ settings.max_step }}" required>
+        </label>
+      </div>
+    </div>
+
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <h2 class="card-title">执行策略</h2>
+      </div>
+      <p class="help">多账号会在随机延迟上限内均匀分散执行，避免集中在同一时间段。</p>
+      <div class="grid">
+        <label class="required-label">
+          <div>
+            <span>随机延迟上限（分钟）</span>
+            <span class="required">*</span>
+          </div>
+          <input type="number" name="random_delay_max" value="{{ settings.random_delay_max }}" min="0" required>
+        </label>
+      </div>
+    </div>
+
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <h2 class="card-title">推送设置</h2>
+      </div>
+      <div class="grid">
+        <label>
+          推送令牌
+          <input type="text" name="push_plus_token" value="{{ settings.push_plus_token or '' }}">
+        </label>
+        <label>
+          推送时段
+          <input type="text" name="push_plus_hour" value="{{ settings.push_plus_hour or '' }}">
+        </label>
+        <label class="required-label">
+          <div>
+            <span>推送上限</span>
+            <span class="required">*</span>
+          </div>
+          <input type="number" name="push_plus_max" value="{{ settings.push_plus_max }}" required>
+        </label>
+      </div>
+    </div>
+
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <h2 class="card-title">通知渠道</h2>
+      </div>
+      <div class="grid">
+        <label>
+          企业微信回调密钥
+          <input type="text" name="push_wechat_webhook_key" value="{{ settings.push_wechat_webhook_key or '' }}">
+        </label>
+        <label>
+          电报机器人令牌
+          <input type="text" name="telegram_bot_token" value="{{ settings.telegram_bot_token or '' }}">
+        </label>
+        <label>
+          电报聊天编号
+          <input type="text" name="telegram_chat_id" value="{{ settings.telegram_chat_id or '' }}">
+        </label>
+      </div>
+    </div>
+
+    <div class="bento-card span-2x2">
+      <div class="card-head">
+        <div>
+          <h2 class="card-title">定时任务</h2>
+        </div>
+      </div>
+      <p class="help">定时表达式按北京时间填写，修改此处命令之后请立即在服务器端执行新命令重启，否则最终步数可能会异常。</p>
+      <div class="form">
+        <label class="required-label">
+          <div>
+            <span>定时表达式</span>
+            <span class="required">*</span>
+          </div>
+          <input type="text" name="cron_expression" value="{{ settings.cron_expression }}" required id="cron-expression">
+        </label>
+        <label class="required-label">
+          <div>
+            <span>服务器时区</span>
+            <span class="required">*</span>
+          </div>
+          <select name="server_timezone" id="server-timezone">
+            <option value="Asia/Shanghai" data-offset="8" {% if settings.server_timezone == "Asia/Shanghai" %}selected{% endif %}>北京时间 (Asia/Shanghai)</option>
+            <option value="Asia/Singapore" data-offset="8" {% if settings.server_timezone == "Asia/Singapore" %}selected{% endif %}>新加坡 (Asia/Singapore)</option>
+            <option value="Asia/Tokyo" data-offset="9" {% if settings.server_timezone == "Asia/Tokyo" %}selected{% endif %}>东京 (Asia/Tokyo)</option>
+            <option value="Asia/Seoul" data-offset="9" {% if settings.server_timezone == "Asia/Seoul" %}selected{% endif %}>首尔 (Asia/Seoul)</option>
+            <option value="Asia/Bangkok" data-offset="7" {% if settings.server_timezone == "Asia/Bangkok" %}selected{% endif %}>曼谷 (Asia/Bangkok)</option>
+            <option value="America/Los_Angeles" data-offset="-8" {% if settings.server_timezone == "America/Los_Angeles" %}selected{% endif %}>美国西部 (America/Los_Angeles)</option>
+            <option value="America/Denver" data-offset="-7" {% if settings.server_timezone == "America/Denver" %}selected{% endif %}>美国山地 (America/Denver)</option>
+            <option value="America/Chicago" data-offset="-6" {% if settings.server_timezone == "America/Chicago" %}selected{% endif %}>美国中部 (America/Chicago)</option>
+            <option value="America/New_York" data-offset="-5" {% if settings.server_timezone == "America/New_York" %}selected{% endif %}>美国东部 (America/New_York)</option>
+            <option value="UTC" data-offset="0" {% if settings.server_timezone == "UTC" %}selected{% endif %}>UTC</option>
+          </select>
+        </label>
+      </div>
+      <div class="cron-command-block">
+        <div class="help">定时命令</div>
+        <pre class="log small" id="cron-command-preview" data-command="{{ settings.cron_command }}"></pre>
+      </div>
+    </div>
+  </section>
+  <div class="save-bar bottom">
+    <button class="button primary" type="submit">保存设置</button>
+  </div>
+</form>
+<script>
+  const cronInput = document.getElementById('cron-expression');
+  const tzSelect = document.getElementById('server-timezone');
+  const cronPreview = document.getElementById('cron-command-preview');
+  const BEIJING_OFFSET = 8;
+
+  function parseHourField(field) {
+    const raw = (field || '').trim();
+    if (!raw) {
+      return null;
+    }
+    if (raw === '*' || raw === '*/1') {
+      return { all: true, values: [] };
+    }
+    const values = new Set();
+    const parts = raw.split(',');
+    for (const partRaw of parts) {
+      const part = partRaw.trim();
+      if (!part) {
+        return null;
+      }
+      let range = part;
+      let step = 1;
+      if (part.includes('/')) {
+        const split = part.split('/');
+        if (split.length !== 2) {
+          return null;
+        }
+        range = split[0];
+        step = parseInt(split[1], 10);
+        if (!step || step < 1) {
+          return null;
+        }
+      }
+      let start = 0;
+      let end = 23;
+      if (range !== '*') {
+        if (range.includes('-')) {
+          const bounds = range.split('-');
+          if (bounds.length !== 2) {
+            return null;
+          }
+          start = parseInt(bounds[0], 10);
+          end = parseInt(bounds[1], 10);
+        } else {
+          start = parseInt(range, 10);
+          end = parseInt(range, 10);
+        }
+      }
+      if (Number.isNaN(start) || Number.isNaN(end)) {
+        return null;
+      }
+      for (let i = start; i <= end; i += step) {
+        if (i < 0 || i > 23) {
+          continue;
+        }
+        values.add(i);
+      }
+    }
+    return { all: false, values: Array.from(values).sort((a, b) => a - b) };
+  }
+
+  function buildHourField(parsed, offset) {
+    if (!parsed) {
+      return null;
+    }
+    if (parsed.all) {
+      return '*';
+    }
+    const shifted = parsed.values.map((h) => (h + offset + 24) % 24);
+    const unique = Array.from(new Set(shifted)).sort((a, b) => a - b);
+    if (unique.length === 24) {
+      return '*';
+    }
+    return unique.join(',');
+  }
+
+  function getTimezoneOffset() {
+    if (!tzSelect) {
+      return 0;
+    }
+    const option = tzSelect.options[tzSelect.selectedIndex];
+    if (!option || !option.dataset || !option.dataset.offset) {
+      return 0;
+    }
+    const value = Number(option.dataset.offset);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function updateCronCommand() {
+    if (!cronInput || !tzSelect || !cronPreview) {
+      return;
+    }
+    const expr = cronInput.value.trim();
+    const command = cronPreview.dataset.command || '';
+    if (!expr) {
+      cronPreview.textContent = '请输入定时表达式';
+      return;
+    }
+    const parts = expr.split(/\s+/);
+    if (parts.length !== 5) {
+      cronPreview.textContent = '定时表达式格式不正确';
+      return;
+    }
+    const minute = parts[0];
+    const hourParsed = parseHourField(parts[1]);
+    if (!hourParsed) {
+      cronPreview.textContent = '定时表达式格式不正确';
+      return;
+    }
+    const offset = getTimezoneOffset();
+    const hourField = buildHourField(hourParsed, offset - BEIJING_OFFSET);
+    if (!hourField) {
+      cronPreview.textContent = '定时表达式格式不正确';
+      return;
+    }
+    const converted = [minute, hourField, parts[2], parts[3], parts[4]].join(' ');
+    cronPreview.textContent = `${converted} ${command}`.trim();
+  }
+
+  if (cronInput && tzSelect && cronPreview) {
+    cronInput.addEventListener('input', updateCronCommand);
+    cronInput.addEventListener('change', updateCronCommand);
+    tzSelect.addEventListener('input', updateCronCommand);
+    tzSelect.addEventListener('change', updateCronCommand);
+    updateCronCommand();
+  }
+</script>
+<script>
+  (() => {
+    const form = document.querySelector(".settings-form");
+    if (!form) {
+      return;
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn && (submitBtn.disabled = true);
+      try {
+        const payload = new FormData(form);
+        const resp = await fetch(form.action, {
+          method: "POST",
+          credentials: "same-origin",
+          body: payload,
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.showMessage?.("success", data.message || "保存成功");
+        } else {
+          const detail = data.detail || data.message || "保存失败";
+          window.showMessage?.("error", detail);
+        }
+      } catch (err) {
+        window.showMessage?.("error", "网络异常，请稍后重试");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}

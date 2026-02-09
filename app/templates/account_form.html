@@ -1,0 +1,286 @@
+﻿{% extends "layout.html" %}
+{% block content %}
+<section class="bento-grid account-form-grid">
+  <div class="bento-card">
+    <h3 class="card-title">添加账号流程</h3>
+    <p class="muted">1. 添加账号密码，设置固定步数/步数范围，选择过期时间，保存。</p>
+    <p class="muted">2. 点击测试按钮，测试是否可以同步。</p>
+    <p class="muted">3. 同步成功，等待每天定时执行即可。</p>
+  </div>
+
+  <div class="bento-card span-2">
+    <div class="card-head">
+      <div>
+        <h1 class="card-title">{{ title }}</h1>
+      </div>
+    </div>
+    <form method="post" action="{{ action }}" class="form" id="accountForm" data-require-password="{% if not account %}1{% else %}0{% endif %}">
+      <label class="required-label">
+        <div>
+          <span>账号</span>
+          <span class="required">*</span>
+        </div>
+        <input type="text" name="username" value="{{ account.username if account else '' }}" required>
+      </label>
+      <label class="required-label">
+        <div>
+          <span>密码</span>
+          {% if not account %}<span class="required">*</span>{% endif %}
+        </div>
+        <input type="password" name="password" value="" {% if not account %}required{% endif %}>
+        {% if account %}
+        <span class="help">留空则保留当前密码。</span>
+        {% endif %}
+      </label>
+      <label>
+        用户来源信息
+        <input type="text" name="source_info" value="{{ account.source_info if account else '' }}">
+      </label>
+      <label>
+        固定步数
+        <input class="no-clear" type="number" name="fixed_step" min="0" max="99999" value="{{ account.fixed_step if account and account.fixed_step else '' }}">
+        <span class="help">为空或 0 使用账号范围/全局范围。</span>
+      </label>
+      <label>
+        账号专属步数范围
+        <div class="grid two-col">
+          <input class="no-clear" type="number" name="min_step_override" min="0" max="99999" placeholder="最小步数" value="{{ account.min_step_override if account and account.min_step_override else '' }}">
+          <input class="no-clear" type="number" name="max_step_override" min="0" max="99999" placeholder="最大步数" value="{{ account.max_step_override if account and account.max_step_override else '' }}">
+        </div>
+        <span class="help">两个都为空或 0 则使用全局范围。</span>
+      </label>
+      <div class="required-label expire-label">
+        <div>
+          <span>过期时间</span>
+          <span class="required">*</span>
+        </div>
+        <div class="expire-inputs">
+          <div class="el-date">
+            <span class="el-date__icon" aria-hidden="true"></span>
+            <input
+              type="date"
+              name="expires_at"
+              id="expiresAt"
+              class="el-date__inner"
+              value="{{ account.expires_at if account and account.expires_at else '' }}"
+            >
+          </div>
+          <label class="el-checkbox">
+            <span class="el-checkbox__input">
+              <input
+                type="checkbox"
+                name="never_expires"
+                id="neverExpires"
+                {% if account and (account.expires_at is not defined or not account.expires_at) %}checked{% endif %}
+              >
+              <span class="el-checkbox__inner"></span>
+            </span>
+            <span class="el-checkbox__label">从不</span>
+          </label>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="button primary" type="submit">保存</button>
+        <a class="button ghost" href="/">取消</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="account-side">
+    <div class="bento-card">
+      <h3 class="card-title">执行说明</h3>
+      <ol class="flow-list">
+        <li>步数规则优先级：固定步数（>0）优先；账号专属范围需最小/最大都填写且最小 ≤ 最大；否则回退到全局范围。</li>
+        <li>定时执行会根据 cron 表达式的“当天最后一次时间”计算递增比例，时间越靠后步数越接近上限。</li>
+        <li>账号停用后不会参与自动执行。</li>
+        <li>测试按钮只对当前账号生效：输入步数后立即执行一次，使用的是第三方接口。</li>
+      </ol>
+    </div>
+    <div class="bento-card">
+      <h3 class="card-title">常见问题</h3>
+      <ol class="faq-list">
+        <li>
+          <button
+            type="button"
+            class="faq-link"
+            data-faq-title="用修改步数会封号吗？"
+            data-faq-body="微信是不会封号的！微信运动可能无法使用，如果刷的步数过多会封微信运动，等7天后解封就好了。"
+          >用修改步数会封号吗？</button>
+        </li>
+        <li>
+          <button
+            type="button"
+            class="faq-link"
+            data-faq-title="微信运动被封了怎么办？"
+            data-faq-body="解绑微信，关闭微信运动，等7天自动解封。"
+          >微信运动被封了怎么办？</button>
+        </li>
+        <li>
+          <button
+            type="button"
+            class="faq-link"
+            data-faq-title="微信运动不同步怎么办？"
+            data-faq-body="点击测试按钮执行一次，看是否同步；若还不同步，微信取消关注amazfit华米公众号，注册一个新的小米运动/Zepp Life APP，重新绑定，重新同步。"
+          >微信运动不同步怎么办？</button>
+        </li>
+        <li>
+          <button
+            type="button"
+            class="faq-link"
+            data-faq-title="为什么步数会有波动？"
+            data-faq-body="系统会根据 cron 的最后执行时间计算递增比例，因此不同时间点执行时步数不同。"
+          >为什么步数会有波动？</button>
+        </li>
+        <li>
+          <button
+            type="button"
+            class="faq-link"
+            data-faq-title="固定步数与账号范围冲突怎么办？"
+            data-faq-body="固定步数优先；若固定步数为空或 0，则使用账号专属范围；否则回退到全局范围。"
+          >固定步数与账号范围冲突怎么办？</button>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+<div class="modal-mask" id="faqMask" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="faqTitle">
+    <div class="modal-head">
+      <h3 class="modal-title" id="faqTitle">常见问题</h3>
+    </div>
+    <div class="modal-body" id="faqBody">-</div>
+    <div class="modal-footer">
+      <button class="button ghost" type="button" id="faqClose">关闭</button>
+    </div>
+  </div>
+</div>
+<script>
+  (() => {
+    const mask = document.getElementById("faqMask");
+    const title = document.getElementById("faqTitle");
+    const body = document.getElementById("faqBody");
+    const closeBtn = document.getElementById("faqClose");
+    const open = (qTitle, qBody) => {
+      if (!mask) {
+        return;
+      }
+      if (title) {
+        title.textContent = qTitle || "常见问题";
+      }
+      if (body) {
+        body.textContent = qBody || "-";
+      }
+      mask.classList.add("open");
+      mask.setAttribute("aria-hidden", "false");
+    };
+    const close = () => {
+      if (!mask) {
+        return;
+      }
+      mask.classList.remove("open");
+      mask.setAttribute("aria-hidden", "true");
+    };
+    document.querySelectorAll(".faq-link").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const qTitle = btn.getAttribute("data-faq-title") || "";
+        const qBody = btn.getAttribute("data-faq-body") || "";
+        open(qTitle, qBody);
+      });
+    });
+    closeBtn?.addEventListener("click", close);
+  })();
+</script>
+<script>
+  (() => {
+    const form = document.getElementById("accountForm");
+    if (!form) {
+      return;
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const username = form.querySelector('input[name="username"]');
+      const password = form.querySelector('input[name="password"]');
+      const neverExpires = form.querySelector('#neverExpires');
+      const expiresAt = form.querySelector('#expiresAt');
+      const requirePassword = form.dataset.requirePassword === "1";
+      if (!username?.value.trim()) {
+        window.showMessage?.("error", "请输入账号");
+        return;
+      }
+      if (requirePassword && !password?.value.trim()) {
+        window.showMessage?.("error", "请输入账号和密码");
+        return;
+      }
+      if (!neverExpires?.checked) {
+        const value = expiresAt?.value || "";
+        if (!value) {
+          window.showMessage?.("error", "请选择过期时间");
+          return;
+        }
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, "0");
+        const dd = String(today.getDate()).padStart(2, "0");
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+        if (value <= todayStr) {
+          window.showMessage?.("error", "过期时间需大于今天");
+          return;
+        }
+      }
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn && (submitBtn.disabled = true);
+      try {
+        const payload = new FormData(form);
+        const resp = await fetch(form.action, {
+          method: "POST",
+          credentials: "same-origin",
+          body: payload,
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.showMessage?.("success", data.message || "保存成功");
+          const target = data.redirect || "/";
+          window.setTimeout(() => {
+            window.location.href = target;
+          }, 600);
+        } else {
+          const detail = data.detail || data.message || "保存失败";
+          window.showMessage?.("error", detail);
+        }
+      } catch (err) {
+        window.showMessage?.("error", "网络异常，请稍后重试");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+        }
+      }
+    });
+    const neverExpires = form.querySelector('#neverExpires');
+    const expiresAt = form.querySelector('#expiresAt');
+    if (expiresAt) {
+      const now = new Date();
+      now.setDate(now.getDate() + 1);
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      expiresAt.min = `${yyyy}-${mm}-${dd}`;
+    }
+    const syncExpireState = () => {
+      if (!neverExpires || !expiresAt) {
+        return;
+      }
+      if (neverExpires.checked) {
+        expiresAt.value = "";
+        expiresAt.disabled = true;
+        expiresAt.removeAttribute("required");
+      } else {
+        expiresAt.disabled = false;
+        expiresAt.setAttribute("required", "required");
+      }
+    };
+    neverExpires?.addEventListener("change", syncExpireState);
+    syncExpireState();
+  })();
+</script>
+{% endblock %}

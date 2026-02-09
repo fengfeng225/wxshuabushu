@@ -1,0 +1,431 @@
+﻿{% extends "layout.html" %}
+{% block content %}
+<section class="bento-grid">
+  <div class="bento-card span-2">
+    <h2 class="card-title">账号概览</h2>
+    <div class="stat-grid">
+      <div class="stat-item primary">
+        <div class="stat-label">账号总数</div>
+        <div class="stat-number" data-role="stat-total">{{ total_accounts }}</div>
+      </div>
+      <div class="stat-item success">
+        <div class="stat-label">启用中</div>
+        <div class="stat-number" data-role="stat-enabled">{{ enabled_accounts }}</div>
+      </div>
+      <div class="stat-item danger">
+        <div class="stat-label">停用中</div>
+        <div class="stat-number" data-role="stat-disabled">{{ disabled_accounts }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bento-card">
+    <h3 class="card-title">搜索提示</h3>
+    <p class="muted">支持账号名称或用户来源信息定位。</p>
+  </div>
+
+  <div class="bento-card">
+    <h3 class="card-title">执行提醒</h3>
+    <p class="muted">仅启用的账号会参与自动执行，点击测试会进行一次手动执行。</p>
+  </div>
+
+  <div class="bento-card span-4">
+    <div class="card-head">
+      <div>
+        <h1 class="card-title">账号管理</h1>
+        <p class="card-subtitle">集中管理账号、执行状态与操作入口。</p>
+      </div>
+      <div class="toolbar">
+        <form class="search-form" method="get" action="/">
+          <input type="text" name="q" placeholder="搜索账号或用户来源信息" value="{{ q or '' }}">
+          <input type="hidden" name="per_page" value="{{ per_page }}">
+          <button class="button ghost" type="submit">搜索</button>
+        </form>
+        <form method="get" action="/accounts/new">
+          <button class="button primary" type="submit">新增账号</button>
+        </form>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="account-table">
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>账号</th>
+            <th>用户来源信息</th>
+            <th>过期时间</th>
+            <th>定时执行</th>
+            <th>创建时间</th>
+            <th>更新时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account in accounts %}
+          <tr>
+            <td>{{ (page - 1) * per_page + loop.index }}</td>
+            <td>{{ account.username }}</td>
+            <td>{{ account.source_info or "-" }}</td>
+            <td>{{ account.expires_at_label }}</td>
+            <td>
+              {% if account.enabled %}
+              <span class="tag success">启用</span>
+              {% else %}
+              <span class="tag fail">停用</span>
+              {% endif %}
+            </td>
+            <td>{{ account.created_at_fmt }}</td>
+            <td>{{ account.updated_at_fmt }}</td>
+            <td>
+              <div class="row-actions">
+                <form class="action-form" method="get" action="/accounts/{{ account.id }}/edit">
+                  <button class="text-link" type="submit">编辑</button>
+                </form>
+                <button
+                  class="text-link"
+                  type="button"
+                  data-action="toggle"
+                  data-url="/accounts/{{ account.id }}/toggle"
+                  data-account-id="{{ account.id }}"
+                  data-account-name="{{ account.username }}"
+                  data-enabled="{% if account.enabled %}1{% else %}0{% endif %}"
+                >切换执行状态</button>
+                <button
+                  class="text-link"
+                  type="button"
+                  data-action="view-password"
+                  data-url="/accounts/{{ account.id }}/password"
+                  data-account-id="{{ account.id }}"
+                  data-account-name="{{ account.username }}"
+                >查看密码</button>
+                <button
+                  class="text-link warning"
+                  type="button"
+                  data-test-account="{{ account.id }}"
+                  data-test-name="{{ account.username }}"
+                >测试</button>
+                <button
+                  class="text-link danger"
+                  type="button"
+                  data-action="delete"
+                  data-url="/accounts/{{ account.id }}/delete"
+                  data-account-id="{{ account.id }}"
+                  data-account-name="{{ account.username }}"
+                  data-enabled="{% if account.enabled %}1{% else %}0{% endif %}"
+                >删除</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if accounts|length == 0 %}
+          <tr>
+            <td colspan="8" class="muted">{% if q %}未找到匹配账号{% else %}暂无账号{% endif %}</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination-bar">
+      <div class="pagination-left">
+        <span class="pagination-total">共 {{ total }} 条</span>
+        <label class="page-size">
+          <select data-role="per-page">
+            {% for size in [10, 20, 50, 100] %}
+              {% if size == per_page %}
+              <option value="{{ size }}" selected>{{ size }} 条/页</option>
+              {% else %}
+              <option value="{{ size }}">{{ size }} 条/页</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="pager">
+        {% if page > 1 %}
+        <a class="page" href="/?page={{ page - 1 }}&per_page={{ per_page }}{% if q %}&q={{ q }}{% endif %}">上一页</a>
+        {% else %}
+        <span class="page disabled">上一页</span>
+        {% endif %}
+        {% for p in page_numbers %}
+          {% if p == page %}
+          <span class="page current">{{ p }}</span>
+          {% else %}
+          <a class="page" href="/?page={{ p }}&per_page={{ per_page }}{% if q %}&q={{ q }}{% endif %}">{{ p }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a class="page" href="/?page={{ page + 1 }}&per_page={{ per_page }}{% if q %}&q={{ q }}{% endif %}">下一页</a>
+        {% else %}
+        <span class="page disabled">下一页</span>
+        {% endif %}
+      </div>
+      <div class="pagination-right">
+        <label class="page-jumper">
+          <span>前往</span>
+          <input type="number" min="1" max="{{ total_pages }}" value="{{ page }}" data-role="page-jump">
+          <span>页</span>
+          <button class="button ghost page-jump-btn" type="button" data-role="page-jump-btn">确定</button>
+        </label>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+  (() => {
+    const perPageSelect = document.querySelector('[data-role="per-page"]');
+    if (perPageSelect) {
+      perPageSelect.addEventListener("change", () => {
+        const params = new URLSearchParams(window.location.search);
+        params.set("per_page", perPageSelect.value);
+        params.set("page", "1");
+        window.location.search = params.toString();
+      });
+    }
+    const jumpInput = document.querySelector('[data-role="page-jump"]');
+    const jumpBtn = document.querySelector('[data-role="page-jump-btn"]');
+    const jump = () => {
+      if (!jumpInput) {
+        return;
+      }
+      const max = parseInt(jumpInput.max || "1", 10);
+      let val = parseInt(jumpInput.value || "1", 10);
+      if (Number.isNaN(val)) {
+        return;
+      }
+      if (val < 1) {
+        val = 1;
+      }
+      if (val > max) {
+        val = max;
+      }
+      const params = new URLSearchParams(window.location.search);
+      params.set("page", String(val));
+      window.location.search = params.toString();
+    };
+    if (jumpInput) {
+      jumpInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          jump();
+        }
+      });
+    }
+    if (jumpBtn) {
+      jumpBtn.addEventListener("click", jump);
+    }
+  })();
+</script>
+<div class="modal-mask" id="passwordMask" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="passwordTitle">
+    <div class="modal-head">
+      <h3 class="modal-title" id="passwordTitle">查看密码</h3>
+    </div>
+    <div class="modal-body">
+      <div class="password-row">
+        <span class="password-label">账号：</span>
+        <span class="password-value" id="passwordAccount">-</span>
+      </div>
+      <div class="password-row">
+        <span class="password-label">密码：</span>
+        <span class="password-value" id="passwordValue">********</span>
+      </div>
+      <div class="password-row">
+        <label class="password-label" for="passwordKey">密钥：</label>
+        <div class="password-input">
+          <input type="password" id="passwordKey" placeholder="请输入查看密钥">
+          <button class="button ghost" type="button" id="passwordViewBtn">查看</button>
+        </div>
+      </div>
+      <div class="help" id="passwordHint">请输入密钥后查看。</div>
+    </div>
+    <div class="modal-footer">
+      <button class="button primary" type="button" id="passwordCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+<script>
+  (() => {
+    const table = document.querySelector(".account-table");
+    if (!table) {
+      return;
+    }
+    const getStat = (role) => document.querySelector(`[data-role="${role}"]`);
+    const updateStat = (role, delta) => {
+      const el = getStat(role);
+      if (!el) {
+        return;
+      }
+      const current = parseInt(el.textContent || "0", 10);
+      if (Number.isNaN(current)) {
+        return;
+      }
+      el.textContent = String(Math.max(0, current + delta));
+    };
+    const updateRowStatus = (row, enabled) => {
+      if (!row) {
+        return;
+      }
+      const tag = row.querySelector(".tag");
+      if (!tag) {
+        return;
+      }
+      if (enabled) {
+        tag.classList.remove("fail");
+        tag.classList.add("success");
+        tag.textContent = "启用";
+      } else {
+        tag.classList.remove("success");
+        tag.classList.add("fail");
+        tag.textContent = "停用";
+      }
+    };
+
+    table.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const btn = target.closest("[data-action]");
+      if (!btn) {
+        return;
+      }
+      const action = btn.getAttribute("data-action");
+      const url = btn.getAttribute("data-url");
+      const name = btn.getAttribute("data-account-name") || "";
+      if (!action || !url) {
+        return;
+      }
+      if (action === "view-password") {
+        const accountId = btn.getAttribute("data-account-id");
+        const name = btn.getAttribute("data-account-name") || "-";
+        if (!accountId) {
+          return;
+        }
+        const mask = document.getElementById("passwordMask");
+        const value = document.getElementById("passwordValue");
+        const accountLabel = document.getElementById("passwordAccount");
+        const keyInput = document.getElementById("passwordKey");
+        const hint = document.getElementById("passwordHint");
+        const viewBtn = document.getElementById("passwordViewBtn");
+        const closeBtn = document.getElementById("passwordCloseBtn");
+        if (!mask || !value || !keyInput || !viewBtn || !closeBtn || !hint || !accountLabel) {
+          return;
+        }
+        value.textContent = "********";
+        accountLabel.textContent = name;
+        keyInput.value = "";
+        hint.textContent = "请输入密钥后查看。";
+        mask.classList.add("open");
+        mask.setAttribute("aria-hidden", "false");
+        const close = () => {
+          mask.classList.remove("open");
+          mask.setAttribute("aria-hidden", "true");
+          viewBtn.onclick = null;
+          closeBtn.onclick = null;
+          mask.onclick = null;
+        };
+        closeBtn.onclick = close;
+        mask.onclick = (evt) => {
+          if (evt.target === mask) {
+            close();
+          }
+        };
+        viewBtn.onclick = async () => {
+          const key = keyInput.value.trim();
+          if (!key) {
+            window.showMessage?.("error", "请输入密钥");
+            return;
+          }
+          viewBtn.disabled = true;
+          try {
+            const payload = new FormData();
+            payload.append("key", key);
+            const resp = await fetch(url, {
+              method: "POST",
+              credentials: "same-origin",
+              body: payload,
+              headers: { "X-Requested-With": "XMLHttpRequest" },
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data.ok) {
+              value.textContent = data.password || "********";
+              hint.textContent = "密钥验证通过";
+            } else {
+              const detail = data.detail || data.message || "校验失败";
+              window.showMessage?.("error", detail);
+            }
+          } catch (err) {
+            window.showMessage?.("error", "网络异常，请稍后重试");
+          } finally {
+            viewBtn.disabled = false;
+          }
+        };
+      }
+      if (action === "toggle") {
+        const currentEnabled = btn.getAttribute("data-enabled") === "1";
+        const nextLabel = currentEnabled ? "停用" : "启用";
+        const ok = await window.showConfirm?.(`确定对账号 ${name} ${nextLabel}定时执行吗？`);
+        if (!ok) {
+          return;
+        }
+        btn.setAttribute("disabled", "disabled");
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok && data.ok) {
+            const nextEnabled = !!data.enabled;
+            btn.setAttribute("data-enabled", nextEnabled ? "1" : "0");
+            updateRowStatus(btn.closest("tr"), nextEnabled);
+            if (currentEnabled !== nextEnabled) {
+              updateStat("stat-enabled", nextEnabled ? 1 : -1);
+              updateStat("stat-disabled", nextEnabled ? -1 : 1);
+            }
+            window.showMessage?.("success", data.message || `账号${name}已${nextLabel}`);
+          } else {
+            const detail = data.detail || data.message || "操作失败";
+            window.showMessage?.("error", detail);
+          }
+        } catch (err) {
+          window.showMessage?.("error", "网络异常，请稍后重试");
+        } finally {
+          btn.removeAttribute("disabled");
+        }
+      }
+      if (action === "delete") {
+        const ok = await window.showConfirm?.(`确定删除账号 ${name} 吗？`);
+        if (!ok) {
+          return;
+        }
+        const row = btn.closest("tr");
+        const wasEnabled = btn.getAttribute("data-enabled") === "1";
+        btn.setAttribute("disabled", "disabled");
+        try {
+          const resp = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok && data.ok) {
+            row?.remove();
+            updateStat("stat-total", -1);
+            updateStat(wasEnabled ? "stat-enabled" : "stat-disabled", -1);
+            window.showMessage?.("success", data.message || `账号${name}删除成功`);
+          } else {
+            const detail = data.detail || data.message || "删除失败";
+            window.showMessage?.("error", detail);
+          }
+        } catch (err) {
+          window.showMessage?.("error", "网络异常，请稍后重试");
+        } finally {
+          btn.removeAttribute("disabled");
+        }
+      }
+    });
+  })();
+</script>
+{% endblock %}

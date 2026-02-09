@@ -1,0 +1,57 @@
+﻿{% extends "layout.html" %}
+{% block content %}
+<section class="bento-grid">
+  <div class="bento-card span-2">
+    <div class="card-head detail-head">
+      <a class="button ghost" href="/logs">← 返回</a>
+    </div>
+    <div class="grid detail-grid">
+      <div>
+        <div class="stat-label">账号</div>
+        <div class="stat-number">{{ run.account_label }}</div>
+      </div>
+      <div>
+        <div class="stat-label">状态</div>
+        <div class="stat-number">
+          {% if run.exit_code is none %}
+          -
+          {% elif run.exit_code == 0 %}
+          <span class="tag success">成功</span>
+          {% else %}
+          <span class="tag fail">失败</span>
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <div class="stat-label">本次目标步数</div>
+        <div class="stat-number">{{ run.step_label }}</div>
+      </div>
+      <div>
+        <div class="stat-label">用户来源信息</div>
+        <div class="stat-number">{{ run.source_info or "-" }}</div>
+      </div>
+      <div>
+        <div class="stat-label">执行方式</div>
+        <div class="stat-number">{{ run.trigger_label }}</div>
+      </div>
+      <div>
+        <div class="stat-label">错误码</div>
+        <div class="stat-number">{{ run.exit_code if run.exit_code is not none else "-" }}</div>
+      </div>
+      <div>
+        <div class="stat-label">开始时间</div>
+        <div class="stat-number">{{ run.started_at_fmt }}</div>
+      </div>
+      <div>
+        <div class="stat-label">结束时间</div>
+        <div class="stat-number">{{ run.finished_at_fmt }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bento-card span-2">
+    <h2 class="card-title">输出</h2>
+    <pre class="log">{{ run.output or "" }}</pre>
+  </div>
+</section>
+{% endblock %}
