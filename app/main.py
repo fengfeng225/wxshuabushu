@@ -475,7 +475,7 @@ async def test_account_post(account_id: int, request: Request):
     ok, message, _data = call_step_api(account.get("username") or "", password, step_value)
     if not ok:
         raise HTTPException(status_code=400, detail=message or "执行失败")
-    return {"ok": True, "message": "success"}
+    return {"ok": True, "message": "success", "data": _data or {}}
 
 
 @app.post("/accounts/{account_id}/password")

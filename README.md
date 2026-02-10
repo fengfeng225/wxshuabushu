@@ -78,7 +78,7 @@ mimotion-manager/
 │   ├── main.py             # FastAPI 主应用（路由、中间件）
 │   ├── db.py               # SQLite 数据库操作层
 │   ├── crypto.py           # Fernet 加密/解密
-│   ├── step_api.py         # 第三方步数 API（备用测试通道）
+│   ├── step_api.py         # 第三方步数 API（来源：https://bs.yanwan.store/run4）
 │   ├── run_once.py         # 批量执行调度逻辑
 │   ├── static/             # 静态资源（CSS、图标）
 │   └── templates/          # Jinja2 HTML 模板
@@ -166,6 +166,7 @@ mimotion-manager/
 ## 致谢
 
 - [TonyJiangWJ/mimotion](https://github.com/TonyJiangWJ/mimotion) - 核心刷步引擎参考实现
+- [bs.yanwan.store](https://bs.yanwan.store/run4/) - 第三方步数接口
 
 ## 免责声明
 

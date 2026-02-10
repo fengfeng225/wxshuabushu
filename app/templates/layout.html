@@ -66,7 +66,7 @@
     <div class="modal-mask" id="testResultMask" aria-hidden="true">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="testResultTitle">
         <div class="modal-head">
-          <h3 class="modal-title" id="testResultTitle">测试结果</h3>
+          <h3 class="modal-title" id="testResultTitle">提示</h3>
         </div>
         <div class="modal-body">
           <div class="result-row">
@@ -259,15 +259,13 @@
           if (!resultMask) {
             return;
           }
-          if (resultTitle) {
-            resultTitle.textContent = ok ? "测试结果" : "测试结果";
-          }
           if (resultIcon) {
-            resultIcon.textContent = ok ? "✓" : "!";
+            resultIcon.textContent = ok ? "✓" : "×";
             resultIcon.className = ok ? "result-icon success" : "result-icon fail";
           }
           if (resultText) {
-            resultText.textContent = ok ? "修改成功" : "修改失败";
+            resultText.textContent = ok ? (detail || "修改成功") : "修改失败";
+            resultText.className = ok ? "result-text success" : "result-text fail";
           }
           if (resultDetail) {
             resultDetail.textContent = ok ? "" : (detail || "执行失败");
@@ -318,8 +316,17 @@
             });
             const data = await resp.json().catch(() => ({}));
             if (resp.ok && data.ok) {
+              const payload = (data && data.data) || {};
+              const user = payload.user || "";
+              const step = payload.step || "";
+              let okDetail = "修改成功";
+              if (user || step) {
+                okDetail = `恭喜，数据提交成功！账号：${user || "-"}，步数：${step || "-"}`;
+              } else if (data && data.message) {
+                okDetail = `失败原因：${data.message}`;
+              }
               close();
-              openResult(true, "");
+              openResult(true, okDetail);
             } else {
               const detail =
                 (data && (data.detail || data.message)) ||

@@ -497,12 +497,14 @@ tbody td {
   gap: 8px;
 }
 
-.result-icon.success {
+.result-icon.success,
+.result-text.success {
   background: #ecfdf3;
   color: #15803d;
 }
 
-.result-icon.fail {
+.result-icon.fail,
+.result-text.fail {
   background: #fef2f2;
   color: #b91c1c;
 }
