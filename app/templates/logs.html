@@ -31,23 +31,12 @@
         </div>
         <div class="today-meta">{{ today_success_rate }} 成功率 · {{ today_total }} 次</div>
       </div>
-      <div class="activity-bar" role="img" aria-label="今日执行情况">
-        {% if today_timeline|length > 0 %}
-          {% for item in today_timeline %}
-          <span
-            class="activity-dot {{ item.status }}"
-            title="{{ item.started_at }} · {{ item.account }} · {{ item.status_label }}"
-          ></span>
-          {% endfor %}
-        {% else %}
+      <div class="activity-bar" id="activityBar" role="img" aria-label="今日执行情况">
+        {% if today_timeline|length == 0 %}
           <span class="muted">今日暂无执行</span>
         {% endif %}
       </div>
-      <div class="activity-scale">
-        <span>00:00</span>
-        <span>12:00</span>
-        <span>现在</span>
-      </div>
+      <div class="activity-scale" id="activityScale"></div>
     </div>
   </div>
 
@@ -56,7 +45,7 @@
     <p class="muted">点击表格右侧“查看”进入详情。</p>
     <div class="compact-tip">
       <span class="tip-icon">↗</span>
-      <span>包含日志输出与错误码</span>
+      <span>包含日志输出</span>
     </div>
   </div>
 
@@ -65,6 +54,29 @@
       <div>
         <h1 class="card-title">执行记录</h1>
         <p class="card-subtitle">最近执行任务与结果。</p>
+      </div>
+      <div class="toolbar">
+        <form class="search-form" method="get" action="/logs">
+          <input type="text" name="q" placeholder="搜索账号" value="{{ q or '' }}">
+          <select name="status" class="el-select">
+            <option value="">全部状态</option>
+            <option value="success" {% if filter_status == 'success' %}selected{% endif %}>成功</option>
+            <option value="fail" {% if filter_status == 'fail' %}selected{% endif %}>失败</option>
+            <option value="pending" {% if filter_status == 'pending' %}selected{% endif %}>进行中</option>
+          </select>
+          <div class="el-date">
+            <span class="el-date__icon" aria-hidden="true"></span>
+            <input type="date" name="date_start" class="el-date__inner" value="{{ filter_date_start or '' }}">
+          </div>
+          <span class="date-sep">至</span>
+          <div class="el-date">
+            <span class="el-date__icon" aria-hidden="true"></span>
+            <input type="date" name="date_end" class="el-date__inner" value="{{ filter_date_end or '' }}">
+          </div>
+          <input type="hidden" name="per_page" value="{{ per_page }}">
+          <button class="button primary" type="submit">查询</button>
+          <a class="button ghost" href="/logs">重置</a>
+        </form>
       </div>
     </div>
     <div class="table-wrap">
@@ -128,8 +140,9 @@
         </label>
       </div>
       <div class="pager">
+        {% set qs = '' %}{% if q %}{% set qs = qs ~ '&q=' ~ q %}{% endif %}{% if filter_status %}{% set qs = qs ~ '&status=' ~ filter_status %}{% endif %}{% if filter_date_start %}{% set qs = qs ~ '&date_start=' ~ filter_date_start %}{% endif %}{% if filter_date_end %}{% set qs = qs ~ '&date_end=' ~ filter_date_end %}{% endif %}
         {% if page > 1 %}
-        <a class="page" href="/logs?page={{ page - 1 }}&per_page={{ per_page }}">上一页</a>
+        <a class="page" href="/logs?page={{ page - 1 }}&per_page={{ per_page }}{{ qs }}">上一页</a>
         {% else %}
         <span class="page disabled">上一页</span>
         {% endif %}
@@ -137,11 +150,11 @@
           {% if p == page %}
           <span class="page current">{{ p }}</span>
           {% else %}
-          <a class="page" href="/logs?page={{ p }}&per_page={{ per_page }}">{{ p }}</a>
+          <a class="page" href="/logs?page={{ p }}&per_page={{ per_page }}{{ qs }}">{{ p }}</a>
           {% endif %}
         {% endfor %}
         {% if page < total_pages %}
-        <a class="page" href="/logs?page={{ page + 1 }}&per_page={{ per_page }}">下一页</a>
+        <a class="page" href="/logs?page={{ page + 1 }}&per_page={{ per_page }}{{ qs }}">下一页</a>
         {% else %}
         <span class="page disabled">下一页</span>
         {% endif %}
@@ -157,6 +170,170 @@
     </div>
   </div>
 </section>
+<script>
+  (() => {
+    const timeline = {{ today_timeline | tojson }};
+    const bar = document.getElementById('activityBar');
+    const scale = document.getElementById('activityScale');
+    if (!bar || !timeline || timeline.length === 0) return;
+
+    const MAX_CELLS = 48;
+
+    function parseTime(raw) {
+      if (!raw) return null;
+      const s = raw.replace('T', ' ').replace('Z', '').trim();
+      // handle "YYYY-MM-DD HH:MM:SS" -> "YYYY/MM/DD HH:MM:SS" for Safari compat
+      const normalized = s.replace(/-/g, '/');
+      const d = new Date(normalized);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function fmtShort(d) {
+      const M = String(d.getMonth() + 1).padStart(2, '0');
+      const D = String(d.getDate()).padStart(2, '0');
+      const h = String(d.getHours()).padStart(2, '0');
+      const m = String(d.getMinutes()).padStart(2, '0');
+      return M + '-' + D + ' ' + h + ':' + m;
+    }
+
+    function fmtHMS(d) {
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function fmtTime(d) {
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function escHtml(s) {
+      const el = document.createElement('span');
+      el.textContent = s;
+      return el.innerHTML;
+    }
+
+    // enrich items with parsed date
+    const items = [];
+    for (const it of timeline) {
+      const d = parseTime(it.started_at_raw) || parseTime(it.started_at);
+      items.push({ ...it, _date: d });
+    }
+
+    const needGroup = items.length > MAX_CELLS;
+
+    function buildSingleCell(it) {
+      const cell = document.createElement('span');
+      cell.className = 'activity-cell ' + it.status;
+      const headerClass = it.status === 'fail' ? ' has-fail' : (it.status === 'pending' ? ' has-pending' : '');
+      const timeStr = it._date ? fmtShort(it._date) : (it.started_at || '-');
+      const stepStr = it.step_count != null ? it.step_count : '-';
+      const statusClass = it.status === 'success' ? 'success' : (it.status === 'fail' ? 'fail' : 'pending');
+      cell.innerHTML = '<div class="activity-tooltip"><div class="tt-header' + headerClass + '">' + escHtml(timeStr) + '</div>'
+        + '<div class="tt-row"><span>账号</span><span class="tt-val">' + escHtml(it.account || '-') + '</span></div>'
+        + '<div class="tt-row"><span>步数</span><span class="tt-val">' + escHtml(String(stepStr)) + '</span></div>'
+        + '<div class="tt-row"><span>结果</span><span class="tt-val ' + statusClass + '">' + escHtml(it.status_label) + '</span></div>'
+        + '</div>';
+      return cell;
+    }
+
+    function buildGroupCell(group) {
+      const total = group.length;
+      const successCount = group.filter(x => x.status === 'success').length;
+      const rate = total > 0 ? Math.round((successCount / total) * 100) : 0;
+      let cellClass;
+      if (total === 0) cellClass = 'pending';
+      else if (rate === 100) cellClass = 'success';
+      else if (rate >= 80) cellClass = 'mixed';
+      else cellClass = 'fail';
+
+      const cell = document.createElement('span');
+      cell.className = 'activity-cell ' + cellClass;
+
+      const first = group[0]._date;
+      const last = group[group.length - 1]._date;
+      let timeRange;
+      if (first && last) {
+        timeRange = fmtShort(first) + ' - ' + fmtHMS(last);
+      } else {
+        timeRange = (first ? fmtShort(first) : '-') + ' - ' + (last ? fmtShort(last) : '-');
+      }
+      const headerBorder = cellClass === 'success' ? 'has-success' : (cellClass === 'mixed' ? 'has-mixed' : (cellClass === 'fail' ? 'has-fail' : 'has-pending'));
+      const rateClass = rate === 100 ? 'success' : (rate >= 80 ? 'mixed' : 'fail');
+
+      cell.innerHTML = '<div class="activity-tooltip"><div class="tt-header ' + headerBorder + '">' + escHtml(timeRange) + '</div>'
+        + '<div class="tt-row"><span>总执行</span><span class="tt-val">' + total + ' 条</span></div>'
+        + '<div class="tt-row"><span>总成功</span><span class="tt-val success">' + successCount + ' 条</span></div>'
+        + '<div class="tt-row"><span>成功率</span><span class="tt-val ' + rateClass + '">' + rate + '%</span></div>'
+        + '</div>';
+      return cell;
+    }
+
+    // clear placeholder
+    bar.innerHTML = '';
+
+    if (!needGroup) {
+      for (const it of items) {
+        bar.appendChild(buildSingleCell(it));
+      }
+    } else {
+      // hide legend in group mode
+      const legend = document.querySelector('.activity-legend');
+      if (legend) legend.style.display = 'none';
+      // group into MAX_CELLS buckets
+      const perBucket = Math.ceil(items.length / MAX_CELLS);
+      for (let i = 0; i < items.length; i += perBucket) {
+        const group = items.slice(i, i + perBucket);
+        bar.appendChild(buildGroupCell(group));
+      }
+    }
+
+    // dynamic scale
+    const cells = bar.querySelectorAll('.activity-cell');
+    if (cells.length === 0) return;
+
+    // collect time for each cell
+    const cellTimes = [];
+    if (!needGroup) {
+      for (const it of items) cellTimes.push(it._date);
+    } else {
+      const perBucket = Math.ceil(items.length / MAX_CELLS);
+      for (let i = 0; i < items.length; i += perBucket) {
+        const group = items.slice(i, i + perBucket);
+        const mid = group[Math.floor(group.length / 2)];
+        cellTimes.push(mid._date);
+      }
+    }
+
+    const totalCells = cells.length;
+    // determine label count: sparse enough
+    const maxLabels = Math.min(6, totalCells);
+    const step = maxLabels <= 1 ? totalCells : Math.floor(totalCells / (maxLabels - 1));
+
+    scale.innerHTML = '';
+
+    const labelIndices = [];
+    if (totalCells <= maxLabels) {
+      for (let i = 0; i < totalCells; i++) labelIndices.push(i);
+    } else {
+      for (let i = 0; i < maxLabels - 1; i++) {
+        labelIndices.push(Math.min(i * step, totalCells - 1));
+      }
+      labelIndices.push(totalCells - 1);
+    }
+    // deduplicate
+    const unique = [...new Set(labelIndices)];
+    requestAnimationFrame(() => {
+      const cellElements = bar.querySelectorAll('.activity-cell');
+      for (const idx of unique) {
+        const cellEl = cellElements[idx];
+        if (!cellEl) continue;
+        const sp = document.createElement('span');
+        const t = cellTimes[idx];
+        sp.textContent = t ? fmtTime(t) : '';
+        sp.style.left = (cellEl.offsetLeft + cellEl.offsetWidth / 2) + 'px';
+        scale.appendChild(sp);
+      }
+    });
+  })();
+</script>
 <script>
   (() => {
     const perPageSelect = document.querySelector('[data-role="per-page"]');

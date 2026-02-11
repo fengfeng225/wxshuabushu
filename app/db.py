@@ -511,6 +511,50 @@ def list_runs(limit=20, offset=0):
         return [dict(row) for row in rows]
 
 
+def _build_runs_filter(account, status, date_start, date_end):
+    clauses = []
+    params = []
+    if account:
+        clauses.append("account_name LIKE ?")
+        params.append(f"%{account}%")
+    if status == "success":
+        clauses.append("exit_code = 0")
+    elif status == "fail":
+        clauses.append("exit_code IS NOT NULL AND exit_code != 0")
+    elif status == "pending":
+        clauses.append("exit_code IS NULL")
+    if date_start:
+        clauses.append("started_at >= ?")
+        params.append(f"{date_start} 00:00:00")
+    if date_end:
+        clauses.append("started_at < ?")
+        params.append(f"{date_end} 23:59:60")
+    where = " AND ".join(clauses)
+    return where, params
+
+
+def count_runs_filtered(account=None, status=None, date_start=None, date_end=None):
+    where, params = _build_runs_filter(account, status, date_start, date_end)
+    sql = "SELECT COUNT(*) AS cnt FROM runs"
+    if where:
+        sql += " WHERE " + where
+    with get_db() as conn:
+        row = conn.execute(sql, params).fetchone()
+        return row["cnt"] if row else 0
+
+
+def list_runs_filtered(account=None, status=None, date_start=None, date_end=None, limit=20, offset=0):
+    where, params = _build_runs_filter(account, status, date_start, date_end)
+    sql = "SELECT * FROM runs"
+    if where:
+        sql += " WHERE " + where
+    sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_run(run_id):
     with get_db() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

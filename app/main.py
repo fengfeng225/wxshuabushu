@@ -22,6 +22,7 @@ from app.db import (
     count_accounts_enabled,
     count_runs,
     count_runs_fail,
+    count_runs_filtered,
     count_runs_success,
     count_runs_by_range,
     list_runs_by_range,
@@ -35,6 +36,7 @@ from app.db import (
     list_accounts,
     list_accounts_filtered,
     list_runs,
+    list_runs_filtered,
     toggle_account,
     update_account,
     update_settings,
@@ -546,8 +548,19 @@ async def update_settings_post(request: Request):
 def logs(request: Request):
     per_page = _normalize_per_page(request.query_params.get("per_page"), 50)
     page = _to_int(request.query_params.get("page"), 1)
-    total = count_runs()
-    page, total_pages, offset, page_numbers = _paginate(total, page, per_page)
+    q = (request.query_params.get("q") or "").strip()
+    filter_status = (request.query_params.get("status") or "").strip()
+    filter_date_start = (request.query_params.get("date_start") or "").strip()
+    filter_date_end = (request.query_params.get("date_end") or "").strip()
+    has_filter = q or filter_status or filter_date_start or filter_date_end
+    if has_filter:
+        total = count_runs_filtered(account=q or None, status=filter_status or None, date_start=filter_date_start or None, date_end=filter_date_end or None)
+        page, total_pages, offset, page_numbers = _paginate(total, page, per_page)
+        runs = list_runs_filtered(account=q or None, status=filter_status or None, date_start=filter_date_start or None, date_end=filter_date_end or None, limit=per_page, offset=offset)
+    else:
+        total = count_runs()
+        page, total_pages, offset, page_numbers = _paginate(total, page, per_page)
+        runs = list_runs(limit=per_page, offset=offset)
     settings_data = get_settings()
     day_start, day_end = _today_range(settings_data.get("server_timezone"))
     today_success = count_runs_by_range(day_start, day_end, success=True)
@@ -556,7 +569,7 @@ def logs(request: Request):
     today_rate_num = round((today_success / today_total) * 100, 1) if today_total else 0.0
     latest_run = list_runs(limit=1, offset=0)
     latest_started = latest_run[0].get("started_at") if latest_run else None
-    today_runs = list_runs_by_range(day_start, day_end, limit=120)
+    today_runs = list_runs_by_range(day_start, day_end)
     today_timeline = []
     for item in today_runs:
         exit_code = item.get("exit_code")
@@ -575,9 +588,10 @@ def logs(request: Request):
                 "status_label": status_label,
                 "started_at": _format_ts(item.get("started_at")),
                 "account": item.get("account_name") or "-",
+                "step_count": item.get("step_count"),
+                "started_at_raw": item.get("started_at") or "",
             }
         )
-    runs = list_runs(limit=per_page, offset=offset)
     for run in runs:
         run["account_label"] = run.get("account_name") or "-"
         run["step_label"] = run.get("step_count") if run.get("step_count") is not None else "-"
@@ -595,6 +609,10 @@ def logs(request: Request):
             total=total,
             total_pages=total_pages,
             page_numbers=page_numbers,
+            q=q,
+            filter_status=filter_status,
+            filter_date_start=filter_date_start,
+            filter_date_end=filter_date_end,
             success_total=count_runs_success(),
             fail_total=count_runs_fail(),
             today_success=today_success,
