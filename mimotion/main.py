@@ -4,6 +4,7 @@ import traceback
 from datetime import datetime
 import pytz
 import uuid
+import hashlib
 
 import json
 import random
@@ -18,6 +19,7 @@ import util.push_util as push_util
 fixed_step = None
 fixed_step_exact = False
 cron_last_minutes = None
+cron_schedule_minutes = None
 
 # 获取默认值转int
 def get_int_value_default(_config: dict, _key, default):
@@ -79,6 +81,33 @@ def _get_cron_last_minutes(expression):
     return max(hour * 60 + minute for hour in hours for minute in minutes)
 
 
+def _get_cron_schedule_minutes(expression):
+    if not expression:
+        return [22 * 60]
+    parts = str(expression).split()
+    if len(parts) < 2:
+        return [22 * 60]
+    minutes = _parse_cron_field(parts[0], 0, 59)
+    hours = _parse_cron_field(parts[1], 0, 23)
+    if not minutes or not hours:
+        return [22 * 60]
+    schedule = sorted({hour * 60 + minute for hour in hours for minute in minutes})
+    return schedule if schedule else [22 * 60]
+
+
+def _get_schedule_slot_index(schedule_minutes, hour, minute):
+    if not schedule_minutes:
+        return 0
+    now_minutes = hour * 60 + minute
+    idx = 0
+    for i, schedule_minute in enumerate(schedule_minutes):
+        if now_minutes >= schedule_minute:
+            idx = i
+        else:
+            break
+    return idx
+
+
 def get_time_rate(hour=None, minute=None):
     if hour is None:
         hour = time_bj.hour
@@ -88,6 +117,12 @@ def get_time_rate(hour=None, minute=None):
     if max_minutes <= 0:
         max_minutes = 1
     return min((hour * 60 + minute) / max_minutes, 1)
+
+
+def get_min_max_config():
+    min_step = get_int_value_default(config, 'MIN_STEP', 18000)
+    max_step = get_int_value_default(config, 'MAX_STEP', 25000)
+    return min_step, max_step
 
 
 # 获取当前时间对应的最大和最小步数
@@ -100,6 +135,101 @@ def get_min_max_by_time(hour=None, minute=None):
     min_step = get_int_value_default(config, 'MIN_STEP', 18000)
     max_step = get_int_value_default(config, 'MAX_STEP', 25000)
     return int(time_rate * min_step), int(time_rate * max_step)
+
+
+def _seed_hex(value: str) -> str:
+    return hashlib.md5(value.encode("utf-8")).hexdigest()
+
+
+def _resolve_daily_target_and_curve(user, min_step, max_step, date_str):
+    seed = _seed_hex(f"{date_str}_{user}")
+    try:
+        seed_target = int(seed[:8], 16)
+        seed_curve = int(seed[8:10], 16)
+        seed_param = int(seed[10:12], 16)
+    except Exception:
+        seed_target = random.randint(0, 2**31 - 1)
+        seed_curve = random.randint(0, 255)
+        seed_param = random.randint(0, 255)
+    span = max_step - min_step + 1
+    if span <= 0:
+        target = min_step
+    else:
+        target = min_step + (seed_target % span)
+    curve_id = seed_curve % 5
+    ratio = seed_param / 255
+    gamma = 1.2 + (ratio * 0.8)
+    gamma_fast = 0.85 + (ratio * 0.2)
+    return target, curve_id, gamma, gamma_fast
+
+
+def _curve_linear(p):
+    return p
+
+
+def _curve_ease_in(p, gamma):
+    return p ** gamma
+
+
+def _curve_ease_out(p, gamma):
+    return 1 - ((1 - p) ** gamma)
+
+
+def _curve_smoothstep(p):
+    return (3 * p * p) - (2 * p * p * p)
+
+
+def _curve_slow_flat_fast(p, gamma_slow, gamma_fast):
+    if p <= 0.4:
+        return 0.4 * ((p / 0.4) ** gamma_slow)
+    if p <= 0.75:
+        return 0.4 + (0.35 * ((p - 0.4) / 0.35))
+    return 0.75 + (0.25 * (((p - 0.75) / 0.25) ** gamma_fast))
+
+
+def _calc_curve_step(user, min_step, max_step, hour, minute):
+    date_str = time_bj.strftime("%Y-%m-%d")
+    schedule = cron_schedule_minutes or []
+    total_slots = len(schedule)
+    if total_slots <= 0:
+        total_slots = 1
+    slot_index = _get_schedule_slot_index(schedule, hour, minute)
+    if slot_index < 0:
+        slot_index = 0
+    if slot_index >= total_slots:
+        slot_index = total_slots - 1
+    target, curve_id, gamma, gamma_fast = _resolve_daily_target_and_curve(user, min_step, max_step, date_str)
+    p0 = slot_index / total_slots
+    p1 = (slot_index + 1) / total_slots
+    if curve_id == 0:
+        f0 = _curve_linear(p0)
+        f1 = _curve_linear(p1)
+    elif curve_id == 1:
+        f0 = _curve_ease_in(p0, gamma)
+        f1 = _curve_ease_in(p1, gamma)
+    elif curve_id == 2:
+        f0 = _curve_ease_out(p0, gamma)
+        f1 = _curve_ease_out(p1, gamma)
+    elif curve_id == 3:
+        f0 = _curve_smoothstep(p0)
+        f1 = _curve_smoothstep(p1)
+    else:
+        f0 = _curve_slow_flat_fast(p0, gamma, gamma_fast)
+        f1 = _curve_slow_flat_fast(p1, gamma, gamma_fast)
+    f0 = max(0.0, min(1.0, f0))
+    f1 = max(0.0, min(1.0, f1))
+    low = int(round(target * f0))
+    high = int(round(target * f1))
+    if low > high:
+        low, high = high, low
+    step_value = random.randint(low, high)
+    return step_value, {
+        "target": target,
+        "slot_index": slot_index,
+        "slot_total": total_slots,
+        "low": low,
+        "high": high,
+    }
 
 
 # 虚拟ip地址
@@ -259,9 +389,15 @@ class MiMotionRunner:
                 if step_value < 1:
                     step_value = 1
             step = str(step_value)
+            self.log_str += f"已设置为固定步数{step}\n"
         else:
-            step = str(random.randint(min_step, max_step))
-        self.log_str += f"已设置为随机步数范围({min_step}~{max_step}) 随机值:{step}\n"
+            step_value, meta = _calc_curve_step(self.user, min_step, max_step, time_bj.hour, time_bj.minute)
+            step = str(step_value)
+            self.log_str += (
+                f"已设置为曲线步数目标({meta['target']}) "
+                f"槽位({meta['slot_index'] + 1}/{meta['slot_total']}) "
+                f"区间({meta['low']}~{meta['high']}) 值:{step}\n"
+            )
         ok, msg = zeppHelper.post_fake_brand_data(step, app_token, self.user_id)
         return f"修改步数（{step}）[" + msg + "]", ok, step
 
@@ -396,6 +532,7 @@ if __name__ == "__main__":
             exit(1)
         cron_expr = config.get('CRON_EXPRESSION') or ''
         cron_last_minutes = _get_cron_last_minutes(cron_expr)
+        cron_schedule_minutes = _get_cron_schedule_minutes(cron_expr)
         fixed_value = config.get('FIXED_STEP')
         try:
             fixed_value = int(fixed_value)
@@ -407,7 +544,7 @@ if __name__ == "__main__":
             fixed_step_exact = False
         else:
             fixed_step = fixed_value
-        min_step, max_step = get_min_max_by_time()
+        min_step, max_step = get_min_max_config()
         use_concurrent = config.get('USE_CONCURRENT')
         if use_concurrent is not None and use_concurrent == 'True':
             use_concurrent = True
