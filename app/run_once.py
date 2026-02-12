@@ -16,6 +16,7 @@ from app.db import (
     list_enabled_accounts,
     set_account_enabled,
     update_run,
+    update_token_data,
 )
 
 try:
@@ -80,19 +81,27 @@ def _build_env(
     env["CONFIG"] = json.dumps(config, ensure_ascii=True)
     if "AES_KEY" in env and not env["AES_KEY"].strip():
         env.pop("AES_KEY")
+    # 从账号记录传递 token 缓存
+    token_data = accounts[0].get("token_data") if accounts else None
+    if token_data:
+        env["TOKEN_DATA"] = token_data
+    elif "TOKEN_DATA" in env:
+        env.pop("TOKEN_DATA")
     env["PYTHONUNBUFFERED"] = "1"
     return env
 
 
 def _extract_result(output):
+    step_value, success_value, token_data = None, None, None
     for line in output.splitlines():
         if line.startswith("MM_RESULT|"):
             parts = line.split("|")
             if len(parts) >= 4:
                 step_value = int(parts[2]) if parts[2].isdigit() else None
                 success_value = parts[3] == "1"
-                return step_value, success_value
-    return None, None
+        elif line.startswith("MM_TOKEN|"):
+            token_data = line.split("|", 1)[1] if "|" in line else None
+    return step_value, success_value, token_data
 
 
 def _normalize_step(value):
@@ -192,11 +201,19 @@ def _run_account(
         output = prefix_output + (result.stdout or "")
         if result.stderr:
             output += "\n" + result.stderr
-        step_count, success_flag = _extract_result(output)
+        step_count, success_flag, token_data = _extract_result(output)
+        # 从日志中移除敏感的 token 数据行
+        clean_lines = [l for l in output.splitlines() if not l.startswith("MM_TOKEN|")]
+        output = "\n".join(clean_lines)
         exit_code = 0
         if result.returncode != 0 or success_flag is not True:
             exit_code = 1
         update_run(run_id, exit_code, output, step_count)
+        # 回写 token 到数据库（仅执行成功时）
+        if token_data and exit_code == 0:
+            account_id = account.get("id")
+            if account_id:
+                update_token_data(account_id, token_data)
         return result.returncode == 0
     except Exception:
         update_run(run_id, 1, prefix_output + traceback.format_exc(), None)

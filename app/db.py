@@ -90,6 +90,7 @@ def _ensure_accounts_columns(conn):
     _ensure_column(conn, "accounts", "min_step_override", "min_step_override INTEGER")
     _ensure_column(conn, "accounts", "max_step_override", "max_step_override INTEGER")
     _ensure_column(conn, "accounts", "expires_at", "expires_at TEXT")
+    _ensure_column(conn, "accounts", "token_data", "token_data TEXT")
 
 
 def _ensure_runs_columns(conn):
@@ -407,6 +408,14 @@ def set_account_enabled(account_id, enabled):
         conn.execute(
             "UPDATE accounts SET enabled = ?, updated_at = ? WHERE id = ?",
             (1 if enabled else 0, _now(), account_id),
+        )
+
+
+def update_token_data(account_id, token_data):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE accounts SET token_data = ? WHERE id = ?",
+            (token_data, account_id),
         )
 
 

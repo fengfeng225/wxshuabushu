@@ -318,21 +318,23 @@ class MiMotionRunner:
             if self.device_id is None:
                 self.device_id = str(uuid.uuid4())
                 user_token_info["device_id"] = self.device_id
+            self.log_str += "[认证] 检测到缓存token，验证app_token有效性...\n"
             ok, msg = zeppHelper.check_app_token(app_token)
             if ok:
-                self.log_str += "使用加密保存的app_token\n"
+                self.log_str += "[认证] app_token有效，复用缓存token\n"
                 return app_token
             else:
-                self.log_str += f"app_token失效 重新获取 last grant time: {user_token_info.get('app_token_time')}\n"
+                self.log_str += f"[认证] app_token已失效，尝试用login_token刷新...\n"
                 # 检查login_token是否可用
                 app_token, msg = zeppHelper.grant_app_token(login_token)
                 if app_token is None:
-                    self.log_str += f"login_token 失效 重新获取 last grant time: {user_token_info.get('login_token_time')}\n"
+                    self.log_str += f"[认证] login_token已失效，尝试用access_token刷新...\n"
                     login_token, app_token, user_id, msg = zeppHelper.grant_login_tokens(access_token, self.device_id,
                                                                                          self.is_phone)
                     if login_token is None:
-                        self.log_str += f"access_token 已失效：{msg} last grant time:{user_token_info.get('access_token_time')}\n"
+                        self.log_str += f"[认证] access_token已失效（{msg}），需要重新登录\n"
                     else:
+                        self.log_str += "[认证] 通过access_token刷新成功\n"
                         user_token_info["login_token"] = login_token
                         user_token_info["app_token"] = app_token
                         user_token_info["user_id"] = user_id
@@ -341,29 +343,31 @@ class MiMotionRunner:
                         self.user_id = user_id
                         return app_token
                 else:
-                    self.log_str += "重新获取app_token成功\n"
+                    self.log_str += "[认证] 通过login_token刷新app_token成功\n"
                     user_token_info["app_token"] = app_token
                     user_token_info["app_token_time"] = get_time()
                     return app_token
+        else:
+            self.log_str += "[认证] 无缓存token\n"
 
         # access_token 失效 或者没有保存加密数据
+        self.log_str += "[认证] 使用账号密码登录...\n"
         access_token, msg = zeppHelper.login_access_token(self.user, self.password)
         if access_token is None:
-            self.log_str += "登录获取accessToken失败：%s" % msg
+            self.log_str += "[认证] 登录失败：%s\n" % msg
             return None
-        # print(f"device_id:{self.device_id} isPhone: {self.is_phone}")
         login_token, app_token, user_id, msg = zeppHelper.grant_login_tokens(access_token, self.device_id,
                                                                              self.is_phone)
         if login_token is None:
-            self.log_str += f"登录提取的 access_token 无效：{msg}"
+            self.log_str += f"[认证] 登录后获取token失败：{msg}\n"
             return None
 
+        self.log_str += "[认证] 登录成功，已获取全部token\n"
         user_token_info = dict()
         user_token_info["access_token"] = access_token
         user_token_info["login_token"] = login_token
         user_token_info["app_token"] = app_token
         user_token_info["user_id"] = user_id
-        # 记录token获取时间
         user_token_info["access_token_time"] = get_time()
         user_token_info["login_token_time"] = get_time()
         user_token_info["app_token_time"] = get_time()
@@ -460,13 +464,24 @@ def execute():
 
 
 def prepare_user_tokens() -> dict:
+    # 优先从环境变量 TOKEN_DATA 读取（单账号 token，由父进程从数据库传入）
+    token_data_env = os.environ.get("TOKEN_DATA")
+    if token_data_env:
+        try:
+            from util.aes_help import base64_to_bytes
+            cipher_bytes = base64_to_bytes(token_data_env)
+            decrypted_data = decrypt_data(cipher_bytes, aes_key, None)
+            return json.loads(decrypted_data.decode('utf-8', errors='strict'))
+        except:
+            print("TOKEN_DATA 解密失败，忽略缓存token")
+            return dict()
+    # 降级：从文件读取（兼容过渡期）
     data_path = r"encrypted_tokens.data"
     if os.path.exists(data_path):
         with open(data_path, 'rb') as f:
             data = f.read()
         try:
             decrypted_data = decrypt_data(data, aes_key, None)
-            # 假设原始明文为 UTF-8 编码文本
             return json.loads(decrypted_data.decode('utf-8', errors='strict'))
         except:
             print("密钥不正确或者加密内容损坏 放弃token")
@@ -476,13 +491,11 @@ def prepare_user_tokens() -> dict:
 
 
 def persist_user_tokens():
-    data_path = r"encrypted_tokens.data"
+    # 输出到 stdout，由父进程 run_once.py 解析并回写数据库
+    from util.aes_help import bytes_to_base64
     origin_str = json.dumps(user_tokens, ensure_ascii=False)
     cipher_data = encrypt_data(origin_str.encode("utf-8"), aes_key, None)
-    with open(data_path, 'wb') as f:
-        f.write(cipher_data)
-        f.flush()
-        f.close()
+    print(f"MM_TOKEN|{bytes_to_base64(cipher_data)}")
 
 
 if __name__ == "__main__":
