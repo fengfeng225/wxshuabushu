@@ -5,11 +5,34 @@ import traceback
 import urllib
 import uuid
 from datetime import datetime
+from urllib.parse import urlparse
 
 import pytz
 import requests
+from requests import exceptions as request_exceptions
 
 from util.aes_help import encrypt_data, HM_AES_KEY, HM_AES_IV
+
+REQUEST_TIMEOUT = (5, 15)
+REQUEST_RETRIES = 3
+REQUEST_BACKOFF_SECONDS = 1.0
+
+_RETRYABLE_EXCEPTIONS = (request_exceptions.ConnectionError, request_exceptions.Timeout)
+
+
+def _request_with_retry(method, url, **kwargs):
+    kwargs.setdefault("timeout", REQUEST_TIMEOUT)
+    last_exc = None
+    for attempt in range(REQUEST_RETRIES):
+        try:
+            return requests.request(method, url, **kwargs)
+        except _RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            parsed = urlparse(url)
+            print(f"[retry] {method.upper()} {parsed.netloc}{parsed.path} 第{attempt + 1}次失败: {exc}")
+            if attempt < REQUEST_RETRIES - 1:
+                time.sleep(REQUEST_BACKOFF_SECONDS * (2 ** attempt))
+    raise last_exc
 
 
 # 通过账号密码获取access_token和refresh_token 但是refresh_token不知道怎么使用
@@ -39,7 +62,7 @@ def login_access_token(user, password) -> (str | None, str | None):
     cipher_data = encrypt_data(plaintext, HM_AES_KEY, HM_AES_IV)
 
     url1 = 'https://api-user.zepp.com/v2/registrations/tokens'
-    r1 = requests.post(url1, data=cipher_data, headers=headers, allow_redirects=False, timeout=5)
+    r1 = _request_with_retry("post", url1, data=cipher_data, headers=headers, allow_redirects=False)
     if r1.status_code != 303:
         return None, "登录异常，status: %d" % r1.status_code
     try:
@@ -127,7 +150,7 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
             "source": "com.xiaomi.hm.health:6.14.0:50818",
             "third_name": "email",
         }
-    resp = requests.post(url, data=data, headers=headers).json()
+    resp = _request_with_retry("post", url, data=data, headers=headers).json()
     # print("请求客户端登录成功：%s" % json.dumps(resp, ensure_ascii=False, indent=2))  #
     _login_token, _userid, _app_token = None, None, None
     try:
@@ -146,7 +169,7 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
 def grant_app_token(login_token: str) -> (str | None, str | None):
     url = f"https://account-cn.huami.com/v1/client/app_tokens?app_name=com.xiaomi.hm.health&dn=api-user.huami.com%2Capi-mifit.huami.com%2Capp-analytics.huami.com&login_token={login_token}"
     headers = {'User-Agent': 'MiFit/5.3.0 (iPhone; iOS 14.7.1; Scale/3.00)'}
-    resp = requests.get(url, headers=headers)
+    resp = _request_with_retry("get", url, headers=headers)
     if resp.status_code != 200:
         return None, "请求异常：%d" % resp.status_code
     resp = resp.json()
@@ -195,7 +218,7 @@ def check_app_token(app_token) -> (bool, str | None):
         "lang": "zh_CN",
         "clientid": "428135909242707968"
     }
-    response = requests.get(url, params=params, headers=headers)
+    response = _request_with_retry("get", url, params=params, headers=headers)
     if response.status_code != 200:
         return False, "请求异常：%d" % response.status_code
     response = response.json()
@@ -228,7 +251,7 @@ def renew_login_token(login_token) -> (str | None, str | None):
         "appplatform": "android_phone"
     }
 
-    resp = requests.get(url, params=params, headers=headers)
+    resp = _request_with_retry("get", url, params=params, headers=headers)
     if resp.status_code != 200:
         return None, "请求异常：%d" % resp.status_code
     resp = resp.json()
@@ -260,7 +283,10 @@ def post_fake_brand_data(step, app_token, userid):
 
     data = f'userid={userid}&last_sync_data_time=1597306380&device_type=0&last_deviceid=DA932FFFFE8816E7&data_json={data_json}'
 
-    response = requests.post(url, data=data, headers=head)
+    try:
+        response = _request_with_retry("post", url, data=data, headers=head)
+    except Exception as exc:
+        return False, f"请求修改步数异常：{exc}"
     if response.status_code != 200:
         return False, "请求修改步数异常：%d" % response.status_code
     response = response.json()
