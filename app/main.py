@@ -1038,12 +1038,12 @@ def _resolve_account_weixin_payload(
         access_token,
         login_token,
         app_token,
-        err or last_error or "微信绑定状态检测失败",
+        err or last_error or "绑定状态检测失败",
     )
     return {
         "available": False,
         "account_id": account_id,
-        "error": err or last_error or "微信绑定状态检测失败",
+        "error": err or last_error or "绑定状态检测失败",
     }
 
 

@@ -194,6 +194,69 @@ def _ensure_runs_columns(conn):
     _ensure_column(conn, "runs", "account_name", "account_name TEXT")
     _ensure_column(conn, "runs", "step_count", "step_count INTEGER")
 
+
+def _ensure_schema_migrations_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _migration_001_ensure_account_sessions(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_sessions (
+            account_id INTEGER PRIMARY KEY,
+            zepp_user_id TEXT,
+            zepp_device_id TEXT,
+            access_token_enc TEXT,
+            login_token_enc TEXT,
+            app_token_enc TEXT,
+            token_data TEXT,
+            token_refreshed_at TEXT,
+            token_last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (account_id) REFERENCES accounts(id)
+        )
+        """
+    )
+    _ensure_account_sessions_columns(conn)
+
+
+def _migration_002_migrate_accounts_token_data(conn):
+    _cleanup_legacy_accounts_token_data_column(conn)
+
+
+def _migration_003_drop_register_sessions(conn):
+    conn.execute("DROP TABLE IF EXISTS register_sessions")
+
+
+MIGRATIONS = (
+    (1, "001_ensure_account_sessions", _migration_001_ensure_account_sessions),
+    (2, "002_migrate_accounts_token_data", _migration_002_migrate_accounts_token_data),
+    (3, "003_drop_register_sessions", _migration_003_drop_register_sessions),
+)
+
+
+def _run_migrations(conn):
+    _ensure_schema_migrations_table(conn)
+    applied_rows = conn.execute("SELECT version FROM schema_migrations").fetchall()
+    applied_versions = {int(row["version"]) for row in applied_rows}
+    for version, name, migration in MIGRATIONS:
+        if version in applied_versions:
+            continue
+        migration(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+            (version, name, _now()),
+        )
+
 @contextmanager
 def get_db():
     ensure_data_dir()
@@ -261,29 +324,8 @@ def init_db():
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS account_sessions (
-                account_id INTEGER PRIMARY KEY,
-                zepp_user_id TEXT,
-                zepp_device_id TEXT,
-                access_token_enc TEXT,
-                login_token_enc TEXT,
-                app_token_enc TEXT,
-                token_data TEXT,
-                token_refreshed_at TEXT,
-                token_last_error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (account_id) REFERENCES accounts(id)
-            )
-            """
-        )
         _ensure_settings_columns(conn)
         _ensure_accounts_columns(conn)
-        _ensure_account_sessions_columns(conn)
-        _cleanup_legacy_accounts_token_data_column(conn)
-        conn.execute("DROP TABLE IF EXISTS register_sessions")
         _ensure_runs_columns(conn)
         row = conn.execute("SELECT id FROM settings WHERE id = 1").fetchone()
         if row is None:
@@ -319,6 +361,7 @@ def init_db():
                     now,
                 ),
             )
+        _run_migrations(conn)
 
 
 def count_accounts():

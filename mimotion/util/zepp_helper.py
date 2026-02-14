@@ -298,19 +298,40 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
             "source": "com.xiaomi.hm.health:6.14.0:50818",
             "third_name": "email",
         }
-    resp = _request_with_retry("post", url, data=data, headers=headers).json()
-    # print("请求客户端登录成功：%s" % json.dumps(resp, ensure_ascii=False, indent=2))  #
-    _login_token, _userid, _app_token = None, None, None
+    response = _request_with_retry("post", url, data=data, headers=headers)
     try:
-        result = resp.get("result")
-        if result != "ok":
-            return None, None, None, "客户端登录失败：%s" % result
-        _login_token = resp["token_info"]["login_token"]
-        _app_token = resp["token_info"]["app_token"]
-        _userid = resp["token_info"]["user_id"]
-    except:
-        print("提取login_token失败：result=%s" % resp.get("result", "unknown"))
-    return _login_token, _app_token, _userid, None
+        resp = response.json()
+    except Exception:
+        body_preview = (response.text or "").strip()[:300]
+        return None, None, None, f"客户端登录失败：非 JSON 响应（http={response.status_code}, body={body_preview or 'empty'}）"
+
+    if not isinstance(resp, dict):
+        return None, None, None, f"客户端登录失败：响应格式异常（{type(resp).__name__}）"
+
+    result = resp.get("result")
+    token_info = resp.get("token_info") if isinstance(resp.get("token_info"), dict) else {}
+    _login_token = token_info.get("login_token")
+    _app_token = token_info.get("app_token")
+    _userid = token_info.get("user_id")
+
+    if result == "ok" and _login_token and _app_token and _userid:
+        return _login_token, _app_token, _userid, None
+
+    details = []
+    if result is not None:
+        details.append(f"result={result}")
+    code = resp.get("code")
+    if code is not None:
+        details.append(f"code={code}")
+    message = resp.get("message") or resp.get("msg") or resp.get("description")
+    if message:
+        details.append(f"message={message}")
+    missing_keys = [k for k in ("login_token", "app_token", "user_id") if not token_info.get(k)]
+    if missing_keys:
+        details.append("token_info缺少=" + ",".join(missing_keys))
+    if not details:
+        details.append(json.dumps(resp, ensure_ascii=False)[:300])
+    return None, None, None, "客户端登录失败：" + " | ".join(details)
 
 
 # 获取app_token 用于提交数据变更

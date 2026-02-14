@@ -254,18 +254,14 @@
 <div class="modal-mask" id="bindingMask" aria-hidden="true">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bindingTitle">
     <div class="modal-head">
-      <h3 class="modal-title" id="bindingTitle">微信绑定状态</h3>
+      <h3 class="modal-title" id="bindingTitle">绑定状态</h3>
     </div>
     <div class="modal-body binding-modal-body">
-      <div class="password-row">
-        <span class="password-label">账号：</span>
-        <span class="password-value" id="bindingAccount">-</span>
-      </div>
       <div class="binding-status-line">
         <span class="password-label">微信：</span>
         <span class="wx-status wx-status-idle" id="bindingStatusTag">未检测</span>
         <button class="text-link" type="button" id="bindingRequestBtn" hidden>点击绑定</button>
-        <button class="button ghost" type="button" id="bindingRefreshBtn">刷新</button>
+        <button class="text-link binding-refresh-link" type="button" id="bindingRefreshBtn" aria-label="刷新绑定状态" title="刷新绑定状态">↻</button>
       </div>
       <div class="help" id="bindingHint">点击“刷新”后检测是否已绑定微信。</div>
       <div class="wx-qr-wrap" id="bindingQrWrap" hidden>
@@ -316,7 +312,7 @@
     };
 
     const bindingMask = document.getElementById("bindingMask");
-    const bindingAccount = document.getElementById("bindingAccount");
+    const bindingTitle = document.getElementById("bindingTitle");
     const bindingStatusTag = document.getElementById("bindingStatusTag");
     const bindingHint = document.getElementById("bindingHint");
     const bindingRefreshBtn = document.getElementById("bindingRefreshBtn");
@@ -394,12 +390,12 @@
     };
 
     const openBindingModal = (accountId, accountName) => {
-      if (!bindingMask || !bindingAccount || !bindingHint || !bindingRequestBtn || !bindingRefreshBtn) {
+      if (!bindingMask || !bindingTitle || !bindingHint || !bindingRequestBtn || !bindingRefreshBtn) {
         return;
       }
       bindingState.accountId = String(accountId || "");
       bindingState.accountName = accountName || "-";
-      bindingAccount.textContent = bindingState.accountName;
+      bindingTitle.textContent = `${bindingState.accountName} 绑定状态`;
       setBindingTag("未检测", "idle");
       bindingHint.textContent = "点击“刷新”后检测是否已绑定微信。";
       bindingRequestBtn.hidden = true;
@@ -417,7 +413,7 @@
       }
       if (!binding || !binding.available) {
         setBindingTag("检测失败", "error");
-        bindingHint.textContent = binding?.error || "微信绑定状态检测失败，请稍后重试。";
+        bindingHint.textContent = binding?.error || "绑定状态检测失败，请稍后重试。";
         bindingRequestBtn.hidden = true;
         bindingRequestBtn.disabled = false;
         bindingRequestBtn.textContent = "点击绑定";
@@ -436,8 +432,11 @@
       }
 
       if (mode === "qrcode" && binding.qr_url) {
-        bindingHint.textContent = "请使用微信扫码绑定；若二维码失效可再次点击“重新获取二维码”。";
-        showBindingAction("重新获取二维码");
+        setBindingTag("\u5f85\u7ed1\u5b9a", "warning");
+        bindingHint.textContent = "\u8bf7\u4f7f\u7528\u5fae\u4fe1\u626b\u7801\u7ed1\u5b9a\uff1b\u7ed1\u5b9a\u5b8c\u6210\u540e\u70b9\u51fb\u201c\u5237\u65b0\u201d\u67e5\u8be2\u72b6\u6001\u3002";
+        bindingRequestBtn.hidden = true;
+        bindingRequestBtn.disabled = false;
+        bindingRequestBtn.textContent = "\u70b9\u51fb\u7ed1\u5b9a";
         renderBindingQr(binding.qr_url);
         return;
       }
@@ -451,9 +450,8 @@
       if (!bindingState.accountId || !bindingRefreshBtn) {
         return;
       }
-      const oldText = bindingRefreshBtn.textContent;
       bindingRefreshBtn.disabled = true;
-      bindingRefreshBtn.textContent = "刷新中...";
+      bindingRefreshBtn.classList.add("is-loading");
       try {
         const resp = await fetch(`/accounts/${bindingState.accountId}/binding/status`, {
           method: "POST",
@@ -466,7 +464,7 @@
           if (data.binding?.is_bind) {
             window.showMessage?.("success", "微信已绑定");
           } else if (!data.binding?.available) {
-            window.showMessage?.("error", data.binding?.error || "微信绑定状态检测失败");
+            window.showMessage?.("error", data.binding?.error || "绑定状态检测失败");
           }
           return;
         }
@@ -474,7 +472,7 @@
       } catch (err) {
         window.showMessage?.("error", "网络异常，请稍后重试");
       } finally {
-        bindingRefreshBtn.textContent = oldText;
+        bindingRefreshBtn.classList.remove("is-loading");
         bindingRefreshBtn.disabled = false;
       }
     };

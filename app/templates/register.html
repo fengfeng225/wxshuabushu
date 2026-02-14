@@ -69,14 +69,28 @@
           credentials: "same-origin",
           headers: { "X-Requested-With": "XMLHttpRequest" },
         });
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data.detail || data.message || `\u83b7\u53d6\u9a8c\u8bc1\u7801\u5931\u8d25\uff08${resp.status}\uff09`);
+        }
+        const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+        if (!contentType.startsWith("image/")) {
+          throw new Error("\u83b7\u53d6\u9a8c\u8bc1\u7801\u5931\u8d25\uff1a\u54cd\u5e94\u683c\u5f0f\u5f02\u5e38");
+        }
         const key = resp.headers.get("X-Captcha-Key") || "";
+        if (!key) {
+          throw new Error("\u83b7\u53d6\u9a8c\u8bc1\u7801\u5931\u8d25\uff1a\u9a8c\u8bc1\u7801 key \u7f3a\u5931");
+        }
         captchaKeyInput.value = key;
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);
         captchaImg.onload = () => URL.revokeObjectURL(url);
         captchaImg.src = url;
       } catch (err) {
-        window.showMessage?.("error", "获取验证码失败");
+        captchaKeyInput.value = "";
+        captchaImg.removeAttribute("src");
+        const message = err instanceof Error ? err.message : "\u83b7\u53d6\u9a8c\u8bc1\u7801\u5931\u8d25";
+        window.showMessage?.("error", message || "\u83b7\u53d6\u9a8c\u8bc1\u7801\u5931\u8d25");
       }
     };
 
@@ -131,7 +145,7 @@
         if (resp.ok && data.ok) {
           window.showMessage?.("success", "注册成功");
           if (data.session_error) {
-            window.showMessage?.("warning", `注册会话初始化提示：${data.session_error}`);
+            console.warn("session init warning:", data.session_error);
           }
           const target = data.redirect || "/accounts/new";
           window.setTimeout(() => {
