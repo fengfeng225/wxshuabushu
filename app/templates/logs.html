@@ -310,31 +310,56 @@
       if (cellElements.length === 0) return;
 
       // 根据实际像素间距决定能放多少标签，避免重叠
-      const MIN_LABEL_GAP = 50; // 标签最小间距(px)
+      // choose candidate labels by width, then remove overlaps by actual text width
+      const MIN_LABEL_GAP = 72;
       const barWidth = bar.offsetWidth;
-      const maxByWidth = Math.max(2, Math.floor(barWidth / MIN_LABEL_GAP));
+      const maxByWidth = Math.max(1, Math.floor(barWidth / MIN_LABEL_GAP));
       const maxLabels = Math.min(6, maxByWidth, totalCells);
 
-      const step = maxLabels <= 1 ? totalCells : Math.floor(totalCells / (maxLabels - 1));
       const labelIndices = [];
       if (totalCells <= maxLabels) {
-        for (let i = 0; i < totalCells; i++) labelIndices.push(i);
+        for (let i = 0; i < totalCells; i++) {
+          labelIndices.push(i);
+        }
       } else {
+        const step = Math.max(1, Math.floor((totalCells - 1) / Math.max(1, maxLabels - 1)));
         for (let i = 0; i < maxLabels - 1; i++) {
           labelIndices.push(Math.min(i * step, totalCells - 1));
         }
         labelIndices.push(totalCells - 1);
       }
-      const unique = [...new Set(labelIndices)];
 
+      const unique = [...new Set(labelIndices)].sort((a, b) => a - b);
       for (const idx of unique) {
         const cellEl = cellElements[idx];
-        if (!cellEl) continue;
-        const sp = document.createElement('span');
+        if (!cellEl) {
+          continue;
+        }
+        const sp = document.createElement("span");
         const t = cellTimes[idx];
-        sp.textContent = t ? fmtTime(t) : '';
-        sp.style.left = (cellEl.offsetLeft + cellEl.offsetWidth / 2) + 'px';
+        sp.textContent = t ? fmtTime(t) : "";
+        sp.style.left = (cellEl.offsetLeft + cellEl.offsetWidth / 2) + "px";
         scale.appendChild(sp);
+      }
+
+      const labels = Array.from(scale.querySelectorAll("span")).sort((a, b) => {
+        return parseFloat(a.style.left) - parseFloat(b.style.left);
+      });
+      let lastRight = -Infinity;
+      const LABEL_SAFE_GAP = 8;
+      for (const label of labels) {
+        const center = parseFloat(label.style.left);
+        if (!Number.isFinite(center)) {
+          continue;
+        }
+        const half = label.offsetWidth / 2;
+        const left = center - half;
+        const right = center + half;
+        if (left < lastRight + LABEL_SAFE_GAP) {
+          label.remove();
+          continue;
+        }
+        lastRight = right;
       }
     });
   })();

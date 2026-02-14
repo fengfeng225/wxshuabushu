@@ -89,7 +89,7 @@
                   data-account-id="{{ account.id }}"
                   data-account-name="{{ account.username }}"
                   data-enabled="{% if account.enabled %}1{% else %}0{% endif %}"
-                >切换执行状态</button>
+                >{% if account.enabled %}停用{% else %}启用{% endif %}</button>
                 <button
                   class="text-link"
                   type="button"
@@ -308,6 +308,10 @@
         tag.classList.remove("success");
         tag.classList.add("fail");
         tag.textContent = "停用";
+      }
+      const toggleBtn = row.querySelector('[data-action="toggle"]');
+      if (toggleBtn) {
+        toggleBtn.textContent = enabled ? "停用" : "启用";
       }
     };
 
