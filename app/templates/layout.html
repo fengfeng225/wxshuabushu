@@ -14,6 +14,7 @@
       <div class="brand">枫枫步数修改</div>
       <nav class="nav">
         <a href="/">账号管理</a>
+        <a href="/register">注册账号</a>
         <a href="/settings">系统设置</a>
         <a href="/logs">执行记录</a>
         <button class="nav-button" type="button" data-action="logout">退出</button>
@@ -367,7 +368,7 @@
     </script>
     <script>
       (() => {
-        const selectors = "input[type='text'], input[type='password'], input[type='number'], textarea";
+        const selectors = "input[type='text'], input[type='email'], input[type='password'], input[type='number'], textarea";
         document.querySelectorAll(selectors).forEach((field) => {
           if (field.closest(".pagination-bar") || field.closest(".settings-form")) {
             return;

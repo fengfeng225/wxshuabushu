@@ -181,7 +181,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   margin-bottom: 16px;
 }
 
@@ -812,6 +812,7 @@ tbody td {
 }
 
 .form input[type="text"],
+.form input[type="email"],
 .form input[type="password"],
 .form input[type="number"] {
   padding: 10px 12px;
@@ -1028,6 +1029,66 @@ tbody td {
 
 .settings-form label {
   gap: 10px;
+}
+
+.proxy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proxy-card .card-head {
+  margin-bottom: 0;
+}
+
+.proxy-card > .help {
+  margin: 0;
+}
+
+.proxy-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 0;
+}
+
+.settings-form .proxy-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 160px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #dbe4f3;
+  background: #f7faff;
+}
+
+.settings-form .proxy-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.settings-form .proxy-toggle span {
+  font-weight: 600;
+}
+
+.settings-form .proxy-input-group {
+  display: grid;
+  gap: 8px;
+}
+
+.proxy-help {
+  margin-top: -2px;
+}
+
+.settings-form input:disabled {
+  background: #f3f4f6;
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .settings-form label.check {
@@ -1682,5 +1743,226 @@ tbody td {
 
   .search-form input {
     min-width: 160px;
+  }
+}
+
+.register-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.register-grid [hidden] {
+  display: none !important;
+}
+
+.register-guide-card {
+  grid-column: span 1;
+}
+
+.register-main-card {
+  grid-column: span 2;
+}
+
+.register-empty-card,
+.register-weixin-card {
+  grid-column: span 1;
+  min-height: 100%;
+}
+
+.register-empty-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.register-empty-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.register-result {
+  display: grid;
+  gap: 12px;
+}
+
+.register-result-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.register-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.result-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.result-value {
+  color: var(--text);
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.eye-toggle {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.eye-toggle:hover {
+  border-color: #c7d2fe;
+  background: #f8fafc;
+}
+
+.captcha-row {
+  flex-direction: column;
+}
+
+.captcha-inputs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.captcha-inputs input {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  height: 42px;
+}
+
+.captcha-img {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+.wx-bind-panel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  display: grid;
+  gap: 10px;
+}
+
+.wx-bind-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wx-bind-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wx-bind-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.wx-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.wx-status-idle {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.wx-status-success {
+  color: #15803d;
+  background: #ecfdf3;
+  border-color: #bbf7d0;
+}
+
+.wx-status-warning {
+  color: #c2410c;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.wx-status-error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.wx-qr-wrap {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.wx-qr-canvas {
+  width: 240px;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.wx-qr-canvas img,
+.wx-qr-canvas canvas {
+  width: 220px;
+  height: 220px;
+  display: block;
+}
+
+@media (max-width: 1024px) {
+  .register-main-card {
+    grid-column: 1 / -1;
+  }
+
+  .register-guide-card,
+  .register-empty-card,
+  .register-weixin-card {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .register-guide-card,
+  .register-main-card,
+  .register-empty-card,
+  .register-weixin-card {
+    grid-column: 1 / -1;
+  }
+
+  .wx-bind-head {
+    flex-wrap: wrap;
   }
 }

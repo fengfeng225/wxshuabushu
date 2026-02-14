@@ -1,5 +1,8 @@
 ﻿import os
+import sys
+import json
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -30,6 +33,7 @@ from app.db import (
     delete_account,
     get_account,
     get_account_by_name,
+    get_account_session,
     get_run,
     get_settings,
     init_db,
@@ -39,6 +43,7 @@ from app.db import (
     list_runs_filtered,
     toggle_account,
     update_account,
+    upsert_account_session,
     update_settings,
 )
 from app.step_api import call_step_api
@@ -53,7 +58,6 @@ APP_SECRET = os.environ.get("APP_SECRET", "")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "admin")
 VIEW_PASSWORD_KEY = os.environ.get("VIEW_PASSWORD_KEY", "")
-
 
 @app.get("/favicon.ico")
 def favicon():
@@ -316,7 +320,7 @@ def new_account(request: Request):
         _template_context(
             request,
             account=None,
-            title="新增账号",
+            title="添加账号",
             action="/accounts",
             message=None,
         ),
@@ -524,6 +528,14 @@ def settings(request: Request):
 async def update_settings_post(request: Request):
     form = await request.form()
     current = get_settings()
+    register_proxy_raw = form.get("register_proxy")
+    if register_proxy_raw is None:
+        register_proxy = _normalize_proxy_url(current.get("register_proxy") or "")
+    else:
+        register_proxy = _normalize_proxy_url(register_proxy_raw)
+    register_proxy_enabled = 1 if form.get("register_proxy_enabled") else 0
+    if register_proxy_enabled and not register_proxy:
+        raise HTTPException(status_code=400, detail="启用代理时请填写代理地址")
     values = {
         "min_step": _to_int(form.get("min_step"), current["min_step"]),
         "max_step": _to_int(form.get("max_step"), current["max_step"]),
@@ -539,6 +551,8 @@ async def update_settings_post(request: Request):
         "server_timezone": (form.get("server_timezone") or current.get("server_timezone") or "Asia/Shanghai").strip(),
         "cron_expression": (form.get("cron_expression") or current["cron_expression"]).strip(),
         "cron_command": (form.get("cron_command") or current["cron_command"]).strip(),
+        "register_proxy": register_proxy,
+        "register_proxy_enabled": register_proxy_enabled,
     }
     update_settings(values)
     return {"ok": True, "message": "保存成功"}
@@ -650,3 +664,442 @@ def log_detail(run_id: int, request: Request):
             title="执行记录",
         ),
     )
+
+
+# ------ 注册账号 ------
+
+# 将 mimotion 根目录加入 sys.path，以便直接导入 zepp_helper
+_MIMOTION_DIR = os.path.join(os.path.dirname(BASE_DIR), "mimotion")
+if _MIMOTION_DIR not in sys.path:
+    sys.path.insert(0, _MIMOTION_DIR)
+
+def _normalize_proxy_url(value: str) -> str:
+    proxy = (value or "").strip()
+    if not proxy:
+        return ""
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+    return proxy
+
+
+def _get_register_proxy():
+    """从数据库设置中读取注册代理地址，未启用则返回 None"""
+    settings_data = get_settings()
+    proxy = _normalize_proxy_url(settings_data.get("register_proxy") or "")
+    if settings_data.get("register_proxy_enabled") and proxy:
+        return proxy
+    return None
+
+
+def _normalize_zepp_login_user(username: str) -> tuple[str, bool]:
+    user = (username or "").strip()
+    if user and (user.startswith("+86") or "@" in user):
+        normalized = user
+    elif user:
+        normalized = f"+86{user}"
+    else:
+        normalized = user
+    return normalized, normalized.startswith("+86")
+
+
+def _decrypt_session_token(token_enc: str | None) -> str | None:
+    if not token_enc:
+        return None
+    try:
+        return decrypt_text(token_enc)
+    except Exception:
+        return None
+
+
+def _encrypt_session_token(token_plain: str | None) -> str | None:
+    if not token_plain:
+        return None
+    try:
+        return encrypt_text(token_plain)
+    except Exception:
+        return None
+
+
+def _build_account_token_data(
+    username: str,
+    access_token: str | None,
+    login_token: str | None,
+    app_token: str | None,
+    zepp_user_id: str | None,
+    zepp_device_id: str | None,
+) -> str | None:
+    if not (access_token and login_token and app_token and zepp_user_id and zepp_device_id):
+        return None
+
+    aes_key_raw = os.environ.get("AES_KEY")
+    if not aes_key_raw:
+        return None
+
+    try:
+        aes_key = aes_key_raw.encode("utf-8")
+    except Exception:
+        return None
+    if len(aes_key) != 16:
+        return None
+
+    try:
+        from util.aes_help import bytes_to_base64, encrypt_data
+        from util.zepp_helper import get_time
+    except Exception:
+        return None
+
+    login_user, _ = _normalize_zepp_login_user(username)
+    now_ms = get_time()
+    payload = {
+        login_user: {
+            "access_token": access_token,
+            "login_token": login_token,
+            "app_token": app_token,
+            "user_id": str(zepp_user_id),
+            "device_id": zepp_device_id,
+            "access_token_time": now_ms,
+            "login_token_time": now_ms,
+            "app_token_time": now_ms,
+        }
+    }
+    try:
+        origin = json.dumps(payload, ensure_ascii=False)
+        cipher_data = encrypt_data(origin.encode("utf-8"), aes_key, None)
+        return bytes_to_base64(cipher_data)
+    except Exception:
+        return None
+
+
+def _persist_account_session_state(
+    account_id: int,
+    username: str,
+    zepp_user_id: str | None,
+    zepp_device_id: str | None,
+    access_token: str | None,
+    login_token: str | None,
+    app_token: str | None,
+    token_last_error: str | None,
+):
+    token_data = _build_account_token_data(
+        username=username,
+        access_token=access_token,
+        login_token=login_token,
+        app_token=app_token,
+        zepp_user_id=zepp_user_id,
+        zepp_device_id=zepp_device_id,
+    )
+    token_refreshed_at = _to_bj_str(datetime.now(_beijing_tz())) if app_token else None
+    upsert_account_session(
+        account_id=account_id,
+        zepp_user_id=str(zepp_user_id) if zepp_user_id else None,
+        zepp_device_id=zepp_device_id,
+        access_token_enc=_encrypt_session_token(access_token),
+        login_token_enc=_encrypt_session_token(login_token),
+        app_token_enc=_encrypt_session_token(app_token),
+        token_data=token_data,
+        token_refreshed_at=token_refreshed_at,
+        token_last_error=token_last_error,
+    )
+
+
+def _query_weixin_payload(
+    account_id: int,
+    app_token: str,
+    zepp_user_id: str,
+    third_party_id: str,
+) -> dict:
+    from util.zepp_helper import check_weixin_bind_status, get_weixin_bind_qr_url
+
+    is_bind, status_err = check_weixin_bind_status(app_token, zepp_user_id, third_party_id)
+    if status_err is not None:
+        return {"available": False, "account_id": account_id, "error": status_err}
+
+    qr_url = None
+    qr_refreshed = False
+    if not is_bind:
+        qr_url, qr_err = get_weixin_bind_qr_url(app_token, zepp_user_id, third_party_id)
+        if qr_err is not None:
+            return {"available": False, "account_id": account_id, "error": qr_err}
+        qr_refreshed = True
+
+    return {
+        "available": True,
+        "account_id": account_id,
+        "is_bind": bool(is_bind),
+        "qr_url": qr_url,
+        "qr_refreshed": qr_refreshed,
+        "needs_qr_refresh_when_unbound": True,
+    }
+
+
+def _resolve_register_weixin_payload(
+    account_id: int,
+    username: str,
+    password: str,
+    preferred_access_token: str | None = None,
+) -> dict:
+    from util.zepp_helper import (
+        _WEIXIN_THIRD_PARTY_ID,
+        grant_app_token,
+        grant_login_tokens,
+        login_access_token,
+    )
+
+    session = get_account_session(account_id) or {}
+    login_user, is_phone = _normalize_zepp_login_user(username)
+
+    zepp_user_id = (session.get("zepp_user_id") or "").strip() or None
+    zepp_device_id = (session.get("zepp_device_id") or "").strip() or str(uuid.uuid4())
+    access_token = preferred_access_token or _decrypt_session_token(session.get("access_token_enc"))
+    login_token = _decrypt_session_token(session.get("login_token_enc"))
+    app_token = _decrypt_session_token(session.get("app_token_enc"))
+    last_error = None
+
+    if app_token and zepp_user_id:
+        payload = _query_weixin_payload(account_id, app_token, zepp_user_id, _WEIXIN_THIRD_PARTY_ID)
+        if payload.get("available"):
+            _persist_account_session_state(
+                account_id,
+                username,
+                zepp_user_id,
+                zepp_device_id,
+                access_token,
+                login_token,
+                app_token,
+                None,
+            )
+            return payload
+        last_error = payload.get("error")
+
+    if access_token:
+        login_token_new, app_token_new, user_id_new, token_err = grant_login_tokens(access_token, zepp_device_id, is_phone)
+        if login_token_new and app_token_new and user_id_new:
+            login_token = login_token_new
+            app_token = app_token_new
+            zepp_user_id = str(user_id_new)
+            payload = _query_weixin_payload(account_id, app_token, zepp_user_id, _WEIXIN_THIRD_PARTY_ID)
+            if payload.get("available"):
+                _persist_account_session_state(
+                    account_id,
+                    username,
+                    zepp_user_id,
+                    zepp_device_id,
+                    access_token,
+                    login_token,
+                    app_token,
+                    None,
+                )
+                return payload
+            last_error = payload.get("error") or token_err
+        else:
+            last_error = token_err or "客户端登录失败"
+
+    if login_token and zepp_user_id:
+        app_token_new, app_err = grant_app_token(login_token)
+        if app_token_new:
+            app_token = app_token_new
+            payload = _query_weixin_payload(account_id, app_token, zepp_user_id, _WEIXIN_THIRD_PARTY_ID)
+            if payload.get("available"):
+                _persist_account_session_state(
+                    account_id,
+                    username,
+                    zepp_user_id,
+                    zepp_device_id,
+                    access_token,
+                    login_token,
+                    app_token,
+                    None,
+                )
+                return payload
+            last_error = payload.get("error") or app_err
+        else:
+            last_error = app_err or "刷新 app_token 失败"
+
+    access_token_new, login_err = login_access_token(login_user, password)
+    if not access_token_new:
+        _persist_account_session_state(
+            account_id,
+            username,
+            zepp_user_id,
+            zepp_device_id,
+            access_token,
+            login_token,
+            app_token,
+            login_err or last_error,
+        )
+        return {
+            "available": False,
+            "account_id": account_id,
+            "error": login_err or last_error or "账号登录失败",
+        }
+
+    access_token = access_token_new
+    login_token_new, app_token_new, user_id_new, token_err = grant_login_tokens(access_token, zepp_device_id, is_phone)
+    if not (login_token_new and app_token_new and user_id_new):
+        _persist_account_session_state(
+            account_id,
+            username,
+            zepp_user_id,
+            zepp_device_id,
+            access_token,
+            login_token,
+            app_token,
+            token_err or last_error,
+        )
+        return {
+            "available": False,
+            "account_id": account_id,
+            "error": token_err or last_error or "客户端登录失败",
+        }
+
+    login_token = login_token_new
+    app_token = app_token_new
+    zepp_user_id = str(user_id_new)
+    payload = _query_weixin_payload(account_id, app_token, zepp_user_id, _WEIXIN_THIRD_PARTY_ID)
+    if payload.get("available"):
+        _persist_account_session_state(
+            account_id,
+            username,
+            zepp_user_id,
+            zepp_device_id,
+            access_token,
+            login_token,
+            app_token,
+            None,
+        )
+        return payload
+
+    _persist_account_session_state(
+        account_id,
+        username,
+        zepp_user_id,
+        zepp_device_id,
+        access_token,
+        login_token,
+        app_token,
+        payload.get("error") or last_error,
+    )
+    return payload
+
+
+@app.get("/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    return templates.TemplateResponse(
+        "register.html",
+        _template_context(request, title="注册账号"),
+    )
+
+
+@app.get("/register/captcha")
+def register_captcha():
+    from util.zepp_helper import get_register_captcha
+
+    image_bytes, captcha_key, err = get_register_captcha(proxy=_get_register_proxy())
+    if err or image_bytes is None:
+        raise HTTPException(status_code=500, detail=err or "获取验证码失败")
+    from fastapi.responses import Response
+
+    return Response(
+        content=image_bytes,
+        media_type="image/png",
+        headers={"X-Captcha-Key": captcha_key or ""},
+    )
+
+
+@app.post("/register")
+async def register_post(request: Request):
+    from util.zepp_helper import register_account
+
+    form = await request.form()
+    email = (form.get("email") or "").strip()
+    password = (form.get("password") or "").strip()
+    captcha_code = (form.get("captcha_code") or "").strip()
+    captcha_key = (form.get("captcha_key") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="请输入邮箱")
+    if not password:
+        raise HTTPException(status_code=400, detail="请输入密码")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="密码长度至少8位")
+    import re as _re
+    if not _re.search(r'[a-zA-Z]', password) or not _re.search(r'[0-9]', password):
+        raise HTTPException(status_code=400, detail="密码必须包含字母和数字")
+    if not captcha_code:
+        raise HTTPException(status_code=400, detail="请输入验证码")
+    if not captcha_key:
+        raise HTTPException(status_code=400, detail="验证码未加载，请刷新后重试")
+
+    existing = get_account_by_name(email)
+    if existing:
+        raise HTTPException(status_code=400, detail="账号已存在")
+
+    access_token, err = register_account(email, password, captcha_code, captcha_key, proxy=_get_register_proxy())
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    settings_data = get_settings()
+    expires_date = _today_date(settings_data.get("server_timezone")) + timedelta(days=30)
+    expires_at = expires_date.strftime("%Y-%m-%d")
+
+    account_id = create_account(
+        email,
+        encrypt_text(password),
+        1,
+        "register_auto",
+        None,
+        None,
+        None,
+        expires_at,
+    )
+
+    weixin_payload = _resolve_register_weixin_payload(
+        account_id=account_id,
+        username=email,
+        password=password,
+        preferred_access_token=access_token,
+    )
+
+    return {
+        "ok": True,
+        "message": "注册成功",
+        "account_id": account_id,
+        "weixin": weixin_payload,
+    }
+
+
+@app.post("/register/weixin/refresh")
+async def register_weixin_refresh(request: Request):
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        body = await request.json()
+    else:
+        form = await request.form()
+        body = dict(form)
+
+    account_id_raw = body.get("account_id")
+    try:
+        account_id = int(str(account_id_raw).strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="缺少 account_id")
+    if account_id <= 0:
+        raise HTTPException(status_code=400, detail="缺少 account_id")
+
+    account = get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="账号不存在")
+
+    try:
+        password = decrypt_text(account.get("password_enc") or "")
+    except Exception:
+        raise HTTPException(status_code=500, detail="账号解密失败")
+
+    weixin_payload = _resolve_register_weixin_payload(
+        account_id=account_id,
+        username=account.get("username") or "",
+        password=password,
+    )
+
+    return {
+        "ok": True,
+        "weixin": weixin_payload,
+    }

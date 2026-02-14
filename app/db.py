@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     "server_timezone": "Asia/Shanghai",
     "cron_expression": "0 1,4,7,10,12,23 * * *",
     "cron_command": "docker compose -f /path/to/docker-compose.yml exec -T mimotion env RUN_TRIGGER=cron python /app/run_once.py",
+    "register_proxy": "",
+    "register_proxy_enabled": 0,
 }
 
 
@@ -82,6 +84,18 @@ def _ensure_settings_columns(conn):
         "cron_command",
         f"cron_command TEXT NOT NULL DEFAULT '{DEFAULT_SETTINGS['cron_command']}'",
     )
+    _ensure_column(
+        conn,
+        "settings",
+        "register_proxy",
+        f"register_proxy TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        conn,
+        "settings",
+        "register_proxy_enabled",
+        f"register_proxy_enabled INTEGER NOT NULL DEFAULT 0",
+    )
 
 
 def _ensure_accounts_columns(conn):
@@ -90,7 +104,90 @@ def _ensure_accounts_columns(conn):
     _ensure_column(conn, "accounts", "min_step_override", "min_step_override INTEGER")
     _ensure_column(conn, "accounts", "max_step_override", "max_step_override INTEGER")
     _ensure_column(conn, "accounts", "expires_at", "expires_at TEXT")
-    _ensure_column(conn, "accounts", "token_data", "token_data TEXT")
+
+
+def _ensure_account_sessions_columns(conn):
+    _ensure_column(conn, "account_sessions", "zepp_user_id", "zepp_user_id TEXT")
+    _ensure_column(conn, "account_sessions", "zepp_device_id", "zepp_device_id TEXT")
+    _ensure_column(conn, "account_sessions", "access_token_enc", "access_token_enc TEXT")
+    _ensure_column(conn, "account_sessions", "login_token_enc", "login_token_enc TEXT")
+    _ensure_column(conn, "account_sessions", "app_token_enc", "app_token_enc TEXT")
+    _ensure_column(conn, "account_sessions", "token_data", "token_data TEXT")
+    _ensure_column(conn, "account_sessions", "token_refreshed_at", "token_refreshed_at TEXT")
+    _ensure_column(conn, "account_sessions", "token_last_error", "token_last_error TEXT")
+
+
+def _cleanup_legacy_accounts_token_data_column(conn):
+    columns = _table_columns(conn, "accounts")
+    if "token_data" not in columns:
+        return
+
+    rows = conn.execute(
+        """
+        SELECT id, token_data
+        FROM accounts
+        WHERE token_data IS NOT NULL AND token_data != ''
+        """
+    ).fetchall()
+    if rows:
+        now = _now()
+        for row in rows:
+            conn.execute(
+                """
+                INSERT INTO account_sessions (
+                    account_id, token_data, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(account_id) DO UPDATE SET
+                    token_data = COALESCE(account_sessions.token_data, excluded.token_data),
+                    updated_at = excluded.updated_at
+                """,
+                (row["id"], row["token_data"], now, now),
+            )
+
+    try:
+        conn.execute("ALTER TABLE accounts DROP COLUMN token_data")
+    except Exception:
+        # 低版本 SQLite 可能不支持 DROP COLUMN，回退为重建表。
+        try:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS accounts_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    password_enc TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    source_info TEXT,
+                    fixed_step INTEGER,
+                    min_step_override INTEGER,
+                    max_step_override INTEGER,
+                    expires_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO accounts_new (
+                    id, username, password_enc, enabled, source_info,
+                    fixed_step, min_step_override, max_step_override, expires_at,
+                    created_at, updated_at
+                )
+                SELECT
+                    id, username, password_enc, enabled, source_info,
+                    fixed_step, min_step_override, max_step_override, expires_at,
+                    created_at, updated_at
+                FROM accounts
+                """
+            )
+            conn.execute("DROP TABLE accounts")
+            conn.execute("ALTER TABLE accounts_new RENAME TO accounts")
+        except Exception:
+            pass
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _ensure_runs_columns(conn):
@@ -146,6 +243,8 @@ def init_db():
                 server_timezone TEXT NOT NULL,
                 cron_expression TEXT NOT NULL,
                 cron_command TEXT NOT NULL,
+                register_proxy TEXT NOT NULL DEFAULT '',
+                register_proxy_enabled INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             )
             """
@@ -162,8 +261,28 @@ def init_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_sessions (
+                account_id INTEGER PRIMARY KEY,
+                zepp_user_id TEXT,
+                zepp_device_id TEXT,
+                access_token_enc TEXT,
+                login_token_enc TEXT,
+                app_token_enc TEXT,
+                token_data TEXT,
+                token_refreshed_at TEXT,
+                token_last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )
+            """
+        )
         _ensure_settings_columns(conn)
         _ensure_accounts_columns(conn)
+        _ensure_account_sessions_columns(conn)
+        _cleanup_legacy_accounts_token_data_column(conn)
         _ensure_runs_columns(conn)
         row = conn.execute("SELECT id FROM settings WHERE id = 1").fetchone()
         if row is None:
@@ -173,9 +292,10 @@ def init_db():
                 INSERT INTO settings (
                     id, min_step, max_step, push_plus_token, push_plus_hour, push_plus_max,
                     push_wechat_webhook_key, telegram_bot_token, telegram_chat_id,
-                    sleep_gap, use_concurrent, random_delay_max, cron_expression, cron_command,
+                    sleep_gap, use_concurrent, random_delay_max, server_timezone,
+                    cron_expression, cron_command, register_proxy, register_proxy_enabled,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     1,
@@ -193,6 +313,8 @@ def init_db():
                     DEFAULT_SETTINGS["server_timezone"],
                     DEFAULT_SETTINGS["cron_expression"],
                     DEFAULT_SETTINGS["cron_command"],
+                    DEFAULT_SETTINGS["register_proxy"],
+                    DEFAULT_SETTINGS["register_proxy_enabled"],
                     now,
                 ),
             )
@@ -298,7 +420,7 @@ def create_account(
 ):
     with get_db() as conn:
         now = _now()
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO accounts (
                 username, password_enc, enabled, source_info,
@@ -320,6 +442,7 @@ def create_account(
                 now,
             ),
         )
+        return cursor.lastrowid
 
 
 def update_account(
@@ -384,6 +507,7 @@ def update_account(
 
 def delete_account(account_id):
     with get_db() as conn:
+        conn.execute("DELETE FROM account_sessions WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
 
 
@@ -411,11 +535,85 @@ def set_account_enabled(account_id, enabled):
         )
 
 
-def update_token_data(account_id, token_data):
+def get_account_session(account_id):
     with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM account_sessions WHERE account_id = ?",
+            (account_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def upsert_account_session(
+    account_id,
+    zepp_user_id=None,
+    zepp_device_id=None,
+    access_token_enc=None,
+    login_token_enc=None,
+    app_token_enc=None,
+    token_data=None,
+    token_refreshed_at=None,
+    token_last_error=None,
+):
+    with get_db() as conn:
+        now = _now()
         conn.execute(
-            "UPDATE accounts SET token_data = ? WHERE id = ?",
-            (token_data, account_id),
+            """
+            INSERT INTO account_sessions (
+                account_id,
+                zepp_user_id,
+                zepp_device_id,
+                access_token_enc,
+                login_token_enc,
+                app_token_enc,
+                token_data,
+                token_refreshed_at,
+                token_last_error,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id) DO UPDATE SET
+                zepp_user_id = excluded.zepp_user_id,
+                zepp_device_id = excluded.zepp_device_id,
+                access_token_enc = excluded.access_token_enc,
+                login_token_enc = excluded.login_token_enc,
+                app_token_enc = excluded.app_token_enc,
+                token_data = COALESCE(excluded.token_data, account_sessions.token_data),
+                token_refreshed_at = excluded.token_refreshed_at,
+                token_last_error = excluded.token_last_error,
+                updated_at = excluded.updated_at
+            """,
+            (
+                account_id,
+                zepp_user_id,
+                zepp_device_id,
+                access_token_enc,
+                login_token_enc,
+                app_token_enc,
+                token_data,
+                token_refreshed_at,
+                token_last_error,
+                now,
+                now,
+            ),
+        )
+
+
+def upsert_account_session_token_data(account_id, token_data):
+    with get_db() as conn:
+        now = _now()
+        conn.execute(
+            """
+            INSERT INTO account_sessions (
+                account_id, token_data, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(account_id) DO UPDATE SET
+                token_data = excluded.token_data,
+                updated_at = excluded.updated_at
+            """,
+            (account_id, token_data, now, now),
         )
 
 
@@ -433,7 +631,8 @@ def update_settings(values):
             SET min_step = ?, max_step = ?, push_plus_token = ?, push_plus_hour = ?,
                 push_plus_max = ?, push_wechat_webhook_key = ?, telegram_bot_token = ?,
                 telegram_chat_id = ?, sleep_gap = ?, use_concurrent = ?, random_delay_max = ?,
-                server_timezone = ?, cron_expression = ?, cron_command = ?, updated_at = ?
+                server_timezone = ?, cron_expression = ?, cron_command = ?,
+                register_proxy = ?, register_proxy_enabled = ?, updated_at = ?
             WHERE id = 1
             """,
             (
@@ -451,6 +650,8 @@ def update_settings(values):
                 values["server_timezone"],
                 values["cron_expression"],
                 values["cron_command"],
+                values.get("register_proxy", ""),
+                values.get("register_proxy_enabled", 0),
                 _now(),
             ),
         )

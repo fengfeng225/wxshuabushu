@@ -17,7 +17,134 @@ REQUEST_TIMEOUT = (5, 15)
 REQUEST_RETRIES = 3
 REQUEST_BACKOFF_SECONDS = 1.0
 
+_APP_NAME = "com.xiaomi.hm.health"
+_APP_CLIENT_ID = "428135909242707968"
+_APP_CV = "50823_6.15.0"
+_APP_USER_AGENT = "MiFit6.15.0 (PPG-AN00; Android 16; Density/3.5)"
+_APP_CHANNEL = "Normal"
+_APP_COUNTRY = "CN"
+_APP_LANG = "zh_CN"
+_APP_TIMEZONE = "Asia/Shanghai"
+_WEIXIN_THIRD_PARTY_ID = "ZrfPEFPl-6W_BwEAkMAgaWQAAAZxVb_HP"
+
 _RETRYABLE_EXCEPTIONS = (request_exceptions.ConnectionError, request_exceptions.Timeout)
+
+_REGISTER_HEADERS = {
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "user-agent": _APP_USER_AGENT,
+    "app_name": _APP_NAME,
+    "appname": _APP_NAME,
+    "appplatform": "android_phone",
+    "accept-language": "zh-CN",
+    "cv": _APP_CV,
+    "v": "2.0",
+    "x-hm-ekv": "1",
+    "hm-privacy-diagnostics": "false",
+    "hm-privacy-ceip": "false",
+}
+
+
+# 获取注册验证码图片和key
+def get_register_captcha(proxy=None) -> (bytes | None, str | None, str | None):
+    """
+    获取注册验证码
+    返回: (captcha_image_bytes, captcha_key, error_msg)
+    """
+    url = f"https://api-user.zepp.com/captcha/register?t={get_time()}"
+    headers = {
+        "user-agent": _REGISTER_HEADERS["user-agent"],
+        "app_name": _APP_NAME,
+        "appname": _APP_NAME,
+    }
+    kwargs = {"headers": headers}
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
+    resp = _request_with_retry("get", url, **kwargs)
+    if resp.status_code != 200:
+        return None, None, "获取验证码失败：%d" % resp.status_code
+    captcha_key = resp.headers.get("captcha-key")
+    if captcha_key is None:
+        return None, None, "获取验证码失败：响应头中缺少captcha-key"
+    return resp.content, captcha_key, None
+
+
+# 注册新账号
+def register_account(email, password, captcha_code, captcha_key, proxy=None) -> (str | None, str | None):
+    """
+    注册新的Zepp Life账号
+    参数:
+      - email: 邮箱地址
+      - password: 密码
+      - captcha_code: 验证码（4位字母）
+      - captcha_key: 验证码关联的key（从get_register_captcha获取）
+      - proxy: HTTP 代理地址，如 http://user:pass@host:port
+    返回: (access_token, error_msg)
+    """
+    # 邮箱前缀作为用户名
+    name = email.split('@')[0] if '@' in email else email
+
+    register_data = {
+        'code': captcha_code,
+        'key': captcha_key,
+        'emailOrPhone': email,
+        'client_id': 'HuaMi',
+        'password': password,
+        'redirect_uri': 'https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html',
+        'region': 'us-west-2',
+        'marketing': 'AmazFit',
+        'country_code': 'CN',
+        'subscriptions': 'marketing',
+        'name': name,
+        'state': 'REDIRECTION',
+        'token': ['access', 'refresh'],
+    }
+
+    query = urllib.parse.urlencode(register_data, doseq=True)
+    plaintext = query.encode('utf-8')
+    cipher_data = encrypt_data(plaintext, HM_AES_KEY, HM_AES_IV)
+
+    headers = dict(_REGISTER_HEADERS)
+    headers["x-request-id"] = str(uuid.uuid4())
+
+    url = 'https://api-user.zepp.com/v2/registrations/register'
+    kwargs = {"data": cipher_data, "headers": headers, "allow_redirects": False}
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
+    r = _request_with_retry("post", url, **kwargs)
+
+    if r.status_code != 303:
+        # 响应体是 AES 加密的，需要解密后才能读取错误信息
+        detail = ""
+        try:
+            from util.aes_help import decrypt_data
+            decrypted = decrypt_data(r.content, HM_AES_KEY, HM_AES_IV)
+            body = json.loads(decrypted.decode("utf-8", errors="replace"))
+            code = body.get("code")
+            if code == 4:
+                detail = "验证码已失效，请刷新后重试"
+            elif code == 12:
+                detail = "请求过于频繁，请稍后再试"
+            else:
+                detail = body.get("message") or body.get("error") or ""
+        except Exception:
+            pass
+        if detail:
+            return None, detail
+        return None, "注册异常，status: %d" % r.status_code
+
+    try:
+        location = r.headers["Location"]
+        # 检查是否有错误
+        error = get_error_code(location)
+        if error:
+            return None, "注册失败：%s" % error
+        access_token = get_access_token(location)
+        if access_token is None:
+            return None, "注册成功但获取accessToken失败"
+    except:
+        return None, f"注册异常：{traceback.format_exc()}"
+
+    return access_token, None
 
 
 def _request_with_retry(method, url, **kwargs):
@@ -35,13 +162,34 @@ def _request_with_retry(method, url, **kwargs):
     raise last_exc
 
 
-# 通过账号密码获取access_token和refresh_token 但是refresh_token不知道怎么使用
+# Build common Mi Fit headers
+def _build_mifit_headers(app_token: str) -> dict[str, str]:
+    return {
+        "User-Agent": _APP_USER_AGENT,
+        "Accept-Encoding": "gzip",
+        "hm-privacy-diagnostics": "false",
+        "country": _APP_COUNTRY,
+        "appplatform": "android_phone",
+        "hm-privacy-ceip": "true",
+        "x-request-id": str(uuid.uuid4()),
+        "timezone": _APP_TIMEZONE,
+        "channel": _APP_CHANNEL,
+        "cv": _APP_CV,
+        "appname": _APP_NAME,
+        "v": "2.0",
+        "apptoken": app_token,
+        "lang": _APP_LANG,
+        "clientid": _APP_CLIENT_ID,
+    }
+
+
+# Login by account/password and return access_token
 def login_access_token(user, password) -> (str | None, str | None):
     headers = {
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
         "user-agent": "MiFit6.14.0 (M2007J1SC; Android 12; Density/2.75)",
-        "app_name": "com.xiaomi.hm.health",
-        "appname": "com.xiaomi.hm.health",
+        "app_name": _APP_NAME,
+        "appname": _APP_NAME,
         "appplatform": "android_phone",
         "x-hm-ekv": "1",
         "hm-privacy-ceip": "false"
@@ -114,10 +262,10 @@ def get_time():
 def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, str | None, str | None, str | None):
     url = "https://account.huami.com/v2/client/login"
     headers = {
-        "app_name": "com.xiaomi.hm.health",
+        "app_name": _APP_NAME,
         "x-request-id": f"{str(uuid.uuid4())}",
         "accept-language": "zh-CN",
-        "appname": "com.xiaomi.hm.health",
+        "appname": _APP_NAME,
         "cv": "50818_6.14.0",
         "v": "2.0",
         "appplatform": "android_phone",
@@ -125,7 +273,7 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
     }
     if is_phone:
         data = {
-            "app_name": "com.xiaomi.hm.health",
+            "app_name": _APP_NAME,
             "app_version": "6.14.0",
             "code": access_token,
             "country_code": "CN",
@@ -137,7 +285,7 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
     else:
         data = {
             "allow_registration=": "false",
-            "app_name": "com.xiaomi.hm.health",
+            "app_name": _APP_NAME,
             "app_version": "6.14.0",
             "code": access_token,
             "country_code": "CN",
@@ -211,7 +359,7 @@ def check_app_token(app_token) -> (bool, str | None):
         "timezone": "Asia/Shanghai",
         "channel": "Normal",
         "cv": "50818_6.14.0",
-        "appname": "com.xiaomi.hm.health",
+        "appname": _APP_NAME,
         "v": "2.0",
         "apptoken": app_token,
         "lang": "zh_CN",
@@ -228,6 +376,73 @@ def check_app_token(app_token) -> (bool, str | None):
         return False, message
 
 
+def check_weixin_bind_status(app_token: str, userid: str | int, third_party_id: str = _WEIXIN_THIRD_PARTY_ID) -> (bool | None, str | None):
+    url = "https://api-mifit-cn3.zepp.com/v1/weixin/user/infos.json"
+    params = {
+        "userid": str(userid),
+        "thirdPartyId": third_party_id,
+    }
+    headers = _build_mifit_headers(app_token)
+
+    response = _request_with_retry("get", url, params=params, headers=headers)
+    if response.status_code != 200:
+        return None, "request failed: %d" % response.status_code
+
+    try:
+        resp = response.json()
+    except ValueError:
+        return None, "invalid JSON response"
+
+    if resp.get("code") != 1:
+        return None, resp.get("message") or "failed to query weixin bind status"
+
+    data = resp.get("data") or {}
+    is_bind = data.get("isbind")
+    if isinstance(is_bind, bool):
+        return is_bind, None
+    if isinstance(is_bind, int):
+        return is_bind == 1, None
+    return None, "missing isbind in response"
+
+
+def get_weixin_bind_qr_url(
+    app_token: str,
+    userid: str | int,
+    third_party_id: str = _WEIXIN_THIRD_PARTY_ID,
+    device_id: str | None = None,
+) -> (str | None, str | None):
+    url = "https://api-mifit-cn3.zepp.com/huami.health.createwxqr.json"
+    if not device_id:
+        device_id = f"mifit_{userid}_huami_{third_party_id}_thirdpartyId"
+
+    params = {
+        "userid": str(userid),
+        "deviceid": device_id,
+    }
+    headers = _build_mifit_headers(app_token)
+
+    response = _request_with_retry("get", url, params=params, headers=headers)
+    if response.status_code != 200:
+        return None, "request failed: %d" % response.status_code
+
+    try:
+        resp = response.json()
+    except ValueError:
+        return None, "invalid JSON response"
+
+    if resp.get("code") != 1:
+        return None, resp.get("message") or "failed to get weixin qrcode"
+
+    data = resp.get("data") or {}
+    qr_url = data.get("list")
+    if isinstance(qr_url, list):
+        qr_url = next((item for item in qr_url if isinstance(item, str) and item), None)
+
+    if not isinstance(qr_url, str) or not qr_url:
+        return None, "missing qrcode url in response"
+    return qr_url, None
+
+
 def renew_login_token(login_token) -> (str | None, str | None):
     url = "https://account-cn3.zepp.com/v1/client/renew_login_token"
     params = {
@@ -240,11 +455,11 @@ def renew_login_token(login_token) -> (str | None, str | None):
     headers = {
         "User-Agent": "MiFit6.14.0 (M2007J1SC; Android 12; Density/2.75)",
         "Accept-Encoding": "gzip",
-        "app_name": "com.xiaomi.hm.health",
+        "app_name": _APP_NAME,
         "hm-privacy-ceip": "false",
         "x-request-id": str(uuid.uuid4()),
         "accept-language": "zh-CN",
-        "appname": "com.xiaomi.hm.health",
+        "appname": _APP_NAME,
         "cv": "50818_6.14.0",
         "v": "2.0",
         "appplatform": "android_phone"

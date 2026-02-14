@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.crypto import decrypt_text
 from app.db import (
+    get_account_session,
     get_account,
     get_settings,
     init_db,
@@ -16,7 +17,7 @@ from app.db import (
     list_enabled_accounts,
     set_account_enabled,
     update_run,
-    update_token_data,
+    upsert_account_session_token_data,
 )
 
 try:
@@ -81,8 +82,14 @@ def _build_env(
     env["CONFIG"] = json.dumps(config, ensure_ascii=True)
     if "AES_KEY" in env and not env["AES_KEY"].strip():
         env.pop("AES_KEY")
-    # 从账号记录传递 token 缓存
-    token_data = accounts[0].get("token_data") if accounts else None
+    # 从账号会话传递 token 缓存
+    token_data = None
+    if accounts:
+        account_id = accounts[0].get("id")
+        if account_id:
+            session = get_account_session(account_id)
+            if session:
+                token_data = session.get("token_data")
     if token_data:
         env["TOKEN_DATA"] = token_data
     elif "TOKEN_DATA" in env:
@@ -209,12 +216,12 @@ def _run_account(
         if result.returncode != 0 or success_flag is not True:
             exit_code = 1
         update_run(run_id, exit_code, output, step_count)
-        # 回写 token 到数据库（仅执行成功时）
-        if token_data and exit_code == 0:
+        # 回写 token 到数据库（只要拿到有效 token 就回写，避免失败场景下丢失刷新后的 token）
+        if token_data:
             account_id = account.get("id")
             if account_id:
-                update_token_data(account_id, token_data)
-        return result.returncode == 0
+                upsert_account_session_token_data(account_id, token_data)
+        return exit_code == 0
     except Exception:
         update_run(run_id, 1, prefix_output + traceback.format_exc(), None)
         return False

@@ -42,46 +42,21 @@
       </div>
     </div>
 
-    <div class="bento-card span-2">
+    <div class="bento-card span-2x2 proxy-card">
       <div class="card-head">
-        <h2 class="card-title">推送设置</h2>
+        <h2 class="card-title">注册代理</h2>
       </div>
-      <div class="grid">
-        <label>
-          推送令牌
-          <input type="text" name="push_plus_token" value="{{ settings.push_plus_token or '' }}">
+      <p class="help">注册账号时使用的 HTTP 代理，关闭则直连。</p>
+      <div class="proxy-settings">
+        <label class="proxy-toggle" for="register-proxy-enabled">
+          <span>启用代理</span>
+          <input type="checkbox" name="register_proxy_enabled" value="1" id="register-proxy-enabled" {% if settings.register_proxy_enabled %}checked{% endif %}>
         </label>
-        <label>
-          推送时段
-          <input type="text" name="push_plus_hour" value="{{ settings.push_plus_hour or '' }}">
+        <label class="proxy-input-group">
+          代理地址
+          <input type="text" name="register_proxy" value="{{ settings.register_proxy or '' }}" placeholder="http://ip:port / user:pass@ip:port" id="register-proxy-input" {% if not settings.register_proxy_enabled %}disabled{% endif %}>
         </label>
-        <label class="required-label">
-          <div>
-            <span>推送上限</span>
-            <span class="required">*</span>
-          </div>
-          <input type="number" name="push_plus_max" value="{{ settings.push_plus_max }}" required>
-        </label>
-      </div>
-    </div>
-
-    <div class="bento-card span-2">
-      <div class="card-head">
-        <h2 class="card-title">通知渠道</h2>
-      </div>
-      <div class="grid">
-        <label>
-          企业微信回调密钥
-          <input type="text" name="push_wechat_webhook_key" value="{{ settings.push_wechat_webhook_key or '' }}">
-        </label>
-        <label>
-          电报机器人令牌
-          <input type="text" name="telegram_bot_token" value="{{ settings.telegram_bot_token or '' }}">
-        </label>
-        <label>
-          电报聊天编号
-          <input type="text" name="telegram_chat_id" value="{{ settings.telegram_chat_id or '' }}">
-        </label>
+        <div class="help proxy-help">支持：http://ip:port、http://user:pass@ip:port、user:pass@ip:port、ip:port</div>
       </div>
     </div>
 
@@ -122,6 +97,49 @@
       <div class="cron-command-block">
         <div class="help">定时命令</div>
         <pre class="log small" id="cron-command-preview" data-command="{{ settings.cron_command }}"></pre>
+      </div>
+    </div>
+
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <h2 class="card-title">推送设置</h2>
+      </div>
+      <div class="grid">
+        <label>
+          推送令牌
+          <input type="text" name="push_plus_token" value="{{ settings.push_plus_token or '' }}">
+        </label>
+        <label>
+          推送时段
+          <input type="text" name="push_plus_hour" value="{{ settings.push_plus_hour or '' }}">
+        </label>
+        <label class="required-label">
+          <div>
+            <span>推送上限</span>
+            <span class="required">*</span>
+          </div>
+          <input type="number" name="push_plus_max" value="{{ settings.push_plus_max }}" required>
+        </label>
+      </div>
+    </div>
+
+    <div class="bento-card span-2">
+      <div class="card-head">
+        <h2 class="card-title">通知渠道</h2>
+      </div>
+      <div class="grid">
+        <label>
+          企业微信回调密钥
+          <input type="text" name="push_wechat_webhook_key" value="{{ settings.push_wechat_webhook_key or '' }}">
+        </label>
+        <label>
+          电报机器人令牌
+          <input type="text" name="telegram_bot_token" value="{{ settings.telegram_bot_token or '' }}">
+        </label>
+        <label>
+          电报聊天编号
+          <input type="text" name="telegram_chat_id" value="{{ settings.telegram_chat_id or '' }}">
+        </label>
       </div>
     </div>
   </section>
@@ -259,6 +277,23 @@
 </script>
 <script>
   (() => {
+    const proxyToggle = document.getElementById("register-proxy-enabled");
+    const proxyInput = document.getElementById("register-proxy-input");
+    if (!proxyToggle || !proxyInput) {
+      return;
+    }
+    const syncProxyState = (focusInput = false) => {
+      proxyInput.disabled = !proxyToggle.checked;
+      if (proxyToggle.checked && focusInput) {
+        proxyInput.focus();
+      }
+    };
+    proxyToggle.addEventListener("change", () => syncProxyState(true));
+    syncProxyState();
+  })();
+</script>
+<script>
+  (() => {
     const form = document.querySelector(".settings-form");
     if (!form) {
       return;
@@ -267,6 +302,14 @@
       event.preventDefault();
       const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn && (submitBtn.disabled = true);
+      const proxyToggle = form.querySelector('#register-proxy-enabled');
+      const proxyInput = form.querySelector('#register-proxy-input');
+      if (proxyToggle?.checked && !(proxyInput?.value || '').trim()) {
+        window.showMessage?.("error", "启用代理时请填写代理地址");
+        submitBtn && (submitBtn.disabled = false);
+        proxyInput?.focus();
+        return;
+      }
       try {
         const payload = new FormData(form);
         const resp = await fetch(form.action, {
