@@ -283,6 +283,7 @@ def init_db():
         _ensure_accounts_columns(conn)
         _ensure_account_sessions_columns(conn)
         _cleanup_legacy_accounts_token_data_column(conn)
+        conn.execute("DROP TABLE IF EXISTS register_sessions")
         _ensure_runs_columns(conn)
         row = conn.execute("SELECT id FROM settings WHERE id = 1").fetchone()
         if row is None:

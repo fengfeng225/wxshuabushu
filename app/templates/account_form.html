@@ -14,20 +14,36 @@
         <h1 class="card-title">{{ title }}</h1>
       </div>
     </div>
-    <form method="post" action="{{ action }}" class="form" id="accountForm" data-require-password="{% if not account %}1{% else %}0{% endif %}">
+    <form
+      method="post"
+      action="{{ action }}"
+      class="form"
+      id="accountForm"
+      data-require-password="{% if not account %}1{% else %}0{% endif %}"
+    >
       <label class="required-label">
         <div>
           <span>账号</span>
           <span class="required">*</span>
         </div>
-        <input type="text" name="username" value="{{ account.username if account else '' }}" required>
+        <input
+          type="text"
+          name="username"
+          value="{{ account.username if account else '' }}"
+          required
+        >
       </label>
       <label class="required-label">
         <div>
           <span>密码</span>
           {% if not account %}<span class="required">*</span>{% endif %}
         </div>
-        <input type="password" name="password" value="" {% if not account %}required{% endif %}>
+        <input
+          type="password"
+          name="password"
+          value=""
+          {% if not account %}required{% endif %}
+        >
         {% if account %}
         <span class="help">留空则保留当前密码。</span>
         {% endif %}
@@ -81,7 +97,7 @@
       </div>
       <div class="toolbar">
         <button class="button primary" type="submit">保存</button>
-        <a class="button ghost" href="/">取消</a>
+        <a class="button ghost" href="/" id="accountFormCancelBtn">取消</a>
       </div>
     </form>
   </div>
@@ -196,6 +212,7 @@
     if (!form) {
       return;
     }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const username = form.querySelector('input[name="username"]');

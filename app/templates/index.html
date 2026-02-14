@@ -99,6 +99,14 @@
                   data-account-name="{{ account.username }}"
                 >查看密码</button>
                 <button
+                  class="text-link"
+                  type="button"
+                  data-action="binding-status"
+                  data-url="/accounts/{{ account.id }}/binding/status"
+                  data-account-id="{{ account.id }}"
+                  data-account-name="{{ account.username }}"
+                >绑定状态</button>
+                <button
                   class="text-link warning"
                   type="button"
                   data-test-account="{{ account.id }}"
@@ -243,6 +251,33 @@
     </div>
   </div>
 </div>
+<div class="modal-mask" id="bindingMask" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bindingTitle">
+    <div class="modal-head">
+      <h3 class="modal-title" id="bindingTitle">微信绑定状态</h3>
+    </div>
+    <div class="modal-body binding-modal-body">
+      <div class="password-row">
+        <span class="password-label">账号：</span>
+        <span class="password-value" id="bindingAccount">-</span>
+      </div>
+      <div class="binding-status-line">
+        <span class="password-label">微信：</span>
+        <span class="wx-status wx-status-idle" id="bindingStatusTag">未检测</span>
+        <button class="text-link" type="button" id="bindingRequestBtn" hidden>点击绑定</button>
+        <button class="button ghost" type="button" id="bindingRefreshBtn">刷新</button>
+      </div>
+      <div class="help" id="bindingHint">点击“刷新”后检测是否已绑定微信。</div>
+      <div class="wx-qr-wrap" id="bindingQrWrap" hidden>
+        <div class="wx-qr-canvas" id="bindingQrCanvas"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="button primary" type="button" id="bindingCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js"></script>
 <script>
   (() => {
     const table = document.querySelector(".account-table");
@@ -280,6 +315,215 @@
       }
     };
 
+    const bindingMask = document.getElementById("bindingMask");
+    const bindingAccount = document.getElementById("bindingAccount");
+    const bindingStatusTag = document.getElementById("bindingStatusTag");
+    const bindingHint = document.getElementById("bindingHint");
+    const bindingRefreshBtn = document.getElementById("bindingRefreshBtn");
+    const bindingRequestBtn = document.getElementById("bindingRequestBtn");
+    const bindingQrWrap = document.getElementById("bindingQrWrap");
+    const bindingQrCanvas = document.getElementById("bindingQrCanvas");
+    const bindingCloseBtn = document.getElementById("bindingCloseBtn");
+
+    const bindingState = {
+      accountId: "",
+      accountName: "",
+    };
+
+    const setBindingTag = (text, type = "idle") => {
+      if (!bindingStatusTag) {
+        return;
+      }
+      bindingStatusTag.textContent = text;
+      bindingStatusTag.className = `wx-status wx-status-${type}`;
+      bindingStatusTag.hidden = false;
+    };
+
+    const showBindingAction = (text) => {
+      if (!bindingRequestBtn || !bindingStatusTag) {
+        return;
+      }
+      bindingStatusTag.hidden = true;
+      bindingRequestBtn.hidden = false;
+      bindingRequestBtn.textContent = text;
+      bindingRequestBtn.disabled = false;
+    };
+
+    const clearBindingQr = () => {
+      if (bindingQrCanvas) {
+        bindingQrCanvas.innerHTML = "";
+      }
+      if (bindingQrWrap) {
+        bindingQrWrap.hidden = true;
+      }
+    };
+
+    const renderBindingQr = (url) => {
+      if (!url || !bindingQrCanvas || !bindingQrWrap) {
+        clearBindingQr();
+        return;
+      }
+      bindingQrCanvas.innerHTML = "";
+      if (typeof window.QRCode === "function") {
+        new window.QRCode(bindingQrCanvas, {
+          text: url,
+          width: 220,
+          height: 220,
+          correctLevel: window.QRCode.CorrectLevel.M,
+        });
+      } else {
+        const img = document.createElement("img");
+        img.alt = "微信绑定二维码";
+        img.width = 220;
+        img.height = 220;
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
+        bindingQrCanvas.appendChild(img);
+      }
+      bindingQrWrap.hidden = false;
+    };
+
+    const closeBindingModal = () => {
+      if (!bindingMask) {
+        return;
+      }
+      bindingMask.classList.remove("open");
+      bindingMask.setAttribute("aria-hidden", "true");
+      bindingState.accountId = "";
+      bindingState.accountName = "";
+      clearBindingQr();
+    };
+
+    const openBindingModal = (accountId, accountName) => {
+      if (!bindingMask || !bindingAccount || !bindingHint || !bindingRequestBtn || !bindingRefreshBtn) {
+        return;
+      }
+      bindingState.accountId = String(accountId || "");
+      bindingState.accountName = accountName || "-";
+      bindingAccount.textContent = bindingState.accountName;
+      setBindingTag("未检测", "idle");
+      bindingHint.textContent = "点击“刷新”后检测是否已绑定微信。";
+      bindingRequestBtn.hidden = true;
+      bindingRequestBtn.disabled = false;
+      bindingRequestBtn.textContent = "点击绑定";
+      bindingRefreshBtn.disabled = false;
+      clearBindingQr();
+      bindingMask.classList.add("open");
+      bindingMask.setAttribute("aria-hidden", "false");
+    };
+
+    const applyBindingPayload = (binding, mode = "status") => {
+      if (!bindingHint || !bindingRequestBtn) {
+        return;
+      }
+      if (!binding || !binding.available) {
+        setBindingTag("检测失败", "error");
+        bindingHint.textContent = binding?.error || "微信绑定状态检测失败，请稍后重试。";
+        bindingRequestBtn.hidden = true;
+        bindingRequestBtn.disabled = false;
+        bindingRequestBtn.textContent = "点击绑定";
+        clearBindingQr();
+        return;
+      }
+
+      if (binding.is_bind) {
+        setBindingTag("已绑定", "success");
+        bindingHint.textContent = "当前账号已绑定微信。";
+        bindingRequestBtn.hidden = true;
+        bindingRequestBtn.disabled = false;
+        bindingRequestBtn.textContent = "点击绑定";
+        clearBindingQr();
+        return;
+      }
+
+      if (mode === "qrcode" && binding.qr_url) {
+        bindingHint.textContent = "请使用微信扫码绑定；若二维码失效可再次点击“重新获取二维码”。";
+        showBindingAction("重新获取二维码");
+        renderBindingQr(binding.qr_url);
+        return;
+      }
+
+      bindingHint.textContent = "尚未检测到微信绑定，请点击“点击绑定”获取二维码。";
+      showBindingAction("点击绑定");
+      clearBindingQr();
+    };
+
+    const refreshBindingStatus = async () => {
+      if (!bindingState.accountId || !bindingRefreshBtn) {
+        return;
+      }
+      const oldText = bindingRefreshBtn.textContent;
+      bindingRefreshBtn.disabled = true;
+      bindingRefreshBtn.textContent = "刷新中...";
+      try {
+        const resp = await fetch(`/accounts/${bindingState.accountId}/binding/status`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          applyBindingPayload(data.binding, "status");
+          if (data.binding?.is_bind) {
+            window.showMessage?.("success", "微信已绑定");
+          } else if (!data.binding?.available) {
+            window.showMessage?.("error", data.binding?.error || "微信绑定状态检测失败");
+          }
+          return;
+        }
+        window.showMessage?.("error", data.detail || data.message || "刷新失败");
+      } catch (err) {
+        window.showMessage?.("error", "网络异常，请稍后重试");
+      } finally {
+        bindingRefreshBtn.textContent = oldText;
+        bindingRefreshBtn.disabled = false;
+      }
+    };
+
+    const requestBindingQrcode = async () => {
+      if (!bindingState.accountId || !bindingRequestBtn) {
+        return;
+      }
+      const oldText = bindingRequestBtn.textContent;
+      bindingRequestBtn.disabled = true;
+      bindingRequestBtn.textContent = "加载中...";
+      try {
+        const resp = await fetch(`/accounts/${bindingState.accountId}/binding/qrcode`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          applyBindingPayload(data.binding, "qrcode");
+          if (data.binding?.is_bind) {
+            window.showMessage?.("success", "微信已绑定");
+          }
+          return;
+        }
+        window.showMessage?.("error", data.detail || data.message || "获取二维码失败");
+      } catch (err) {
+        window.showMessage?.("error", "网络异常，请稍后重试");
+      } finally {
+        bindingRequestBtn.textContent = oldText;
+        bindingRequestBtn.disabled = false;
+      }
+    };
+
+    bindingCloseBtn?.addEventListener("click", closeBindingModal);
+    bindingMask?.addEventListener("click", (event) => {
+      if (event.target === bindingMask) {
+        closeBindingModal();
+      }
+    });
+    bindingRefreshBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      refreshBindingStatus();
+    });
+    bindingRequestBtn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      requestBindingQrcode();
+    });
+
     table.addEventListener("click", async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
@@ -293,6 +537,15 @@
       const url = btn.getAttribute("data-url");
       const name = btn.getAttribute("data-account-name") || "";
       if (!action || !url) {
+        return;
+      }
+      if (action === "binding-status") {
+        const accountId = btn.getAttribute("data-account-id") || "";
+        const accountName = btn.getAttribute("data-account-name") || "-";
+        if (!accountId) {
+          return;
+        }
+        openBindingModal(accountId, accountName);
         return;
       }
       if (action === "view-password") {

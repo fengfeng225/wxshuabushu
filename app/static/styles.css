@@ -1893,6 +1893,10 @@ tbody td {
   border: 1px solid transparent;
 }
 
+.wx-status[hidden] {
+  display: none !important;
+}
+
 .wx-status-idle {
   color: #1d4ed8;
   background: #eff6ff;
@@ -1923,6 +1927,14 @@ tbody td {
   justify-items: start;
 }
 
+.wx-qr-wrap[hidden] {
+  display: none !important;
+}
+
+#bindingRequestBtn[hidden] {
+  display: none !important;
+}
+
 .wx-qr-canvas {
   width: 240px;
   min-height: 240px;
@@ -1940,6 +1952,22 @@ tbody td {
   width: 220px;
   height: 220px;
   display: block;
+}
+
+.binding-modal-body {
+  display: grid;
+  gap: 10px;
+}
+
+.binding-status-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#bindingMask .modal {
+  width: min(520px, 92vw);
 }
 
 @media (max-width: 1024px) {

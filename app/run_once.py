@@ -7,7 +7,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 
-from app.crypto import decrypt_text
+from app.crypto import decrypt_text, encrypt_text
 from app.db import (
     get_account_session,
     get_account,
@@ -17,6 +17,7 @@ from app.db import (
     list_enabled_accounts,
     set_account_enabled,
     update_run,
+    upsert_account_session,
     upsert_account_session_token_data,
 )
 
@@ -24,6 +25,10 @@ try:
     from zoneinfo import ZoneInfo
 except Exception:  # pragma: no cover - fallback for older Python
     ZoneInfo = None
+
+_MIMOTION_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mimotion")
+if _MIMOTION_DIR not in sys.path:
+    sys.path.insert(0, _MIMOTION_DIR)
 
 
 def _build_config(
@@ -109,6 +114,74 @@ def _extract_result(output):
         elif line.startswith("MM_TOKEN|"):
             token_data = line.split("|", 1)[1] if "|" in line else None
     return step_value, success_value, token_data
+
+
+def _normalize_zepp_login_user(username: str) -> str:
+    user = (username or "").strip()
+    if user and (user.startswith("+86") or "@" in user):
+        return user
+    if user:
+        return f"+86{user}"
+    return user
+
+
+def _now_bj_str() -> str:
+    tz = timezone(timedelta(hours=8))
+    return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _extract_session_snapshot_from_token_data(username: str, token_data: str) -> dict | None:
+    if not token_data:
+        return None
+    aes_key_raw = os.environ.get("AES_KEY") or ""
+    if not aes_key_raw:
+        return None
+    try:
+        aes_key = aes_key_raw.encode("utf-8")
+    except Exception:
+        return None
+    if len(aes_key) != 16:
+        return None
+
+    try:
+        from util.aes_help import base64_to_bytes, decrypt_data
+    except Exception:
+        return None
+
+    try:
+        cipher_bytes = base64_to_bytes(token_data)
+        plain_bytes = decrypt_data(cipher_bytes, aes_key, None)
+        payload = json.loads(plain_bytes.decode("utf-8", errors="strict"))
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict) or not payload:
+        return None
+
+    normalized_user = _normalize_zepp_login_user(username)
+    node = payload.get(normalized_user)
+    if not isinstance(node, dict):
+        node = payload.get((username or "").strip())
+    if not isinstance(node, dict):
+        node = next((value for value in payload.values() if isinstance(value, dict)), None)
+    if not isinstance(node, dict):
+        return None
+
+    access_token = node.get("access_token")
+    login_token = node.get("login_token")
+    app_token = node.get("app_token")
+    user_id = node.get("user_id")
+    device_id = node.get("device_id")
+    if not (access_token and login_token and app_token and user_id and device_id):
+        return None
+
+    return {
+        "access_token": str(access_token),
+        "login_token": str(login_token),
+        "app_token": str(app_token),
+        "zepp_user_id": str(user_id),
+        "zepp_device_id": str(device_id),
+    }
 
 
 def _normalize_step(value):
@@ -220,7 +293,24 @@ def _run_account(
         if token_data:
             account_id = account.get("id")
             if account_id:
-                upsert_account_session_token_data(account_id, token_data)
+                snapshot = _extract_session_snapshot_from_token_data(account.get("username") or "", token_data)
+                if snapshot:
+                    try:
+                        upsert_account_session(
+                            account_id=account_id,
+                            zepp_user_id=snapshot.get("zepp_user_id"),
+                            zepp_device_id=snapshot.get("zepp_device_id"),
+                            access_token_enc=encrypt_text(snapshot.get("access_token")),
+                            login_token_enc=encrypt_text(snapshot.get("login_token")),
+                            app_token_enc=encrypt_text(snapshot.get("app_token")),
+                            token_data=token_data,
+                            token_refreshed_at=_now_bj_str(),
+                            token_last_error=None,
+                        )
+                    except Exception:
+                        upsert_account_session_token_data(account_id, token_data)
+                else:
+                    upsert_account_session_token_data(account_id, token_data)
         return exit_code == 0
     except Exception:
         update_run(run_id, 1, prefix_output + traceback.format_exc(), None)

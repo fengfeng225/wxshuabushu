@@ -6,7 +6,7 @@
     <ol class="flow-list">
       <li>使用邮箱注册一个新的 Zepp Life 账号。</li>
       <li>验证码区分大小写，看不清点击图片刷新。</li>
-      <li>注册成功后先完成微信绑定，再去账号管理中添加账号。</li>
+      <li>注册成功后自动跳转到“添加账号”页面，继续完善账号设置。</li>
     </ol>
   </div>
 
@@ -15,269 +15,53 @@
       <h1 class="card-title">注册账号</h1>
     </div>
 
-    <div id="registerFormView">
-      <form class="form" id="registerForm">
-        <label class="required-label">
-          <div>
-            <span>邮箱</span>
-            <span class="required">*</span>
-          </div>
-          <input type="email" name="email" id="regEmail" placeholder="example@mail.com" required>
-        </label>
-        <label class="required-label">
-          <div>
-            <span>密码</span>
-            <span class="required">*</span>
-          </div>
-          <input type="password" name="password" id="regPassword" required>
-        </label>
-        <div class="required-label captcha-row">
-          <div>
-            <span>验证码</span>
-            <span class="required">*</span>
-          </div>
-          <div class="captcha-inputs">
-            <input type="text" name="captcha_code" id="regCaptchaCode" class="no-clear" maxlength="6" placeholder="输入验证码" required>
-            <img
-              class="captcha-img"
-              id="captchaImg"
-              alt="验证码"
-              title="点击刷新验证码"
-            >
-          </div>
+    <form class="form" id="registerForm">
+      <label class="required-label">
+        <div>
+          <span>邮箱</span>
+          <span class="required">*</span>
         </div>
-        <input type="hidden" name="captcha_key" id="regCaptchaKey" value="">
-        <div class="toolbar">
-          <button class="button primary" type="submit" id="regSubmit">注册</button>
-          <a class="button ghost" href="/">返回</a>
+        <input type="email" name="email" id="regEmail" placeholder="example@mail.com" required>
+      </label>
+      <label class="required-label">
+        <div>
+          <span>密码</span>
+          <span class="required">*</span>
         </div>
-      </form>
-    </div>
-
-    <div class="register-result" id="registerResultView" hidden>
-      <p class="register-result-title">注册成功</p>
-      <div class="register-result-row">
-        <span class="result-label">邮箱：</span>
-        <span class="result-value" id="registeredEmail">-</span>
+        <input type="password" name="password" id="regPassword" required>
+      </label>
+      <div class="required-label captcha-row">
+        <div>
+          <span>验证码</span>
+          <span class="required">*</span>
+        </div>
+        <div class="captcha-inputs">
+          <input type="text" name="captcha_code" id="regCaptchaCode" class="no-clear" maxlength="6" placeholder="输入验证码" required>
+          <img
+            class="captcha-img"
+            id="captchaImg"
+            alt="验证码"
+            title="点击刷新验证码"
+          >
+        </div>
       </div>
-      <div class="register-result-row">
-        <span class="result-label">密码：</span>
-        <span class="result-value" id="registeredPassword">********</span>
-        <button class="eye-toggle" type="button" id="togglePasswordBtn" aria-label="显示密码" aria-pressed="false" title="显示/隐藏密码">👁</button>
+      <input type="hidden" name="captcha_key" id="regCaptchaKey" value="">
+      <div class="toolbar">
+        <button class="button primary" type="submit" id="regSubmit">注册</button>
+        <a class="button ghost" href="/">返回</a>
       </div>
-      <p class="help">请先完成右侧微信绑定，确认后再到账号管理中添加账号。</p>
-    </div>
+    </form>
   </div>
 
-  <div class="bento-card register-empty-card" id="registerEmptyCard"></div>
-
-  <div class="bento-card register-weixin-card" id="wxBindCard" hidden>
-    <div class="wx-bind-panel" id="wxBindPanel">
-      <div class="wx-bind-head">
-        <div class="wx-bind-status-row">
-          <h3 class="wx-bind-title">微信绑定状态</h3>
-          <span class="wx-status wx-status-idle" id="wxBindStatusText">待检测</span>
-        </div>
-        <button class="button ghost" type="button" id="wxRefreshBtn" disabled>刷新</button>
-      </div>
-      <p class="help" id="wxBindHint">注册成功后可在此查看微信绑定状态。</p>
-      <div class="wx-qr-wrap" id="wxQrWrap" hidden>
-        <div class="wx-qr-canvas" id="wxQrCanvas"></div>
-      </div>
-    </div>
-  </div>
+  <div class="bento-card register-empty-card" aria-hidden="true"></div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js"></script>
 <script>
   (() => {
     const form = document.getElementById("registerForm");
-    const registerFormView = document.getElementById("registerFormView");
-    const registerResultView = document.getElementById("registerResultView");
-    const registeredEmail = document.getElementById("registeredEmail");
-    const registeredPassword = document.getElementById("registeredPassword");
-    const togglePasswordBtn = document.getElementById("togglePasswordBtn");
-    const registerEmptyCard = document.getElementById("registerEmptyCard");
-    const wxBindCard = document.getElementById("wxBindCard");
-
     const captchaImg = document.getElementById("captchaImg");
     const captchaKeyInput = document.getElementById("regCaptchaKey");
     const submitBtn = document.getElementById("regSubmit");
-
-    const wxBindPanel = document.getElementById("wxBindPanel");
-    const wxBindStatusText = document.getElementById("wxBindStatusText");
-    const wxBindHint = document.getElementById("wxBindHint");
-    const wxRefreshBtn = document.getElementById("wxRefreshBtn");
-    const wxQrWrap = document.getElementById("wxQrWrap");
-    const wxQrCanvas = document.getElementById("wxQrCanvas");
-
-    const wxState = {
-      accountId: "",
-    };
-
-    const accountState = {
-      email: "",
-      password: "",
-      showPlain: false,
-    };
-
-    const maskPassword = (value) => {
-      const raw = String(value || "");
-      return raw ? "*".repeat(raw.length) : "";
-    };
-
-    const renderPassword = () => {
-      if (!registeredPassword || !togglePasswordBtn) {
-        return;
-      }
-      registeredPassword.textContent = accountState.showPlain ? accountState.password : maskPassword(accountState.password);
-      togglePasswordBtn.setAttribute("aria-pressed", String(accountState.showPlain));
-      togglePasswordBtn.setAttribute("aria-label", accountState.showPlain ? "隐藏密码" : "显示密码");
-      togglePasswordBtn.textContent = accountState.showPlain ? "🙈" : "👁";
-    };
-
-    const showRegisterResult = (email, password) => {
-      accountState.email = email || "";
-      accountState.password = password || "";
-      accountState.showPlain = false;
-
-      if (registeredEmail) {
-        registeredEmail.textContent = accountState.email || "-";
-      }
-      renderPassword();
-
-      if (registerFormView) {
-        registerFormView.hidden = true;
-      }
-      if (registerResultView) {
-        registerResultView.hidden = false;
-      }
-    };
-
-    const setWxStatus = (text, type = "idle") => {
-      if (!wxBindStatusText) {
-        return;
-      }
-      wxBindStatusText.textContent = text;
-      wxBindStatusText.className = `wx-status wx-status-${type}`;
-    };
-
-    const clearWxQr = () => {
-      if (wxQrCanvas) {
-        wxQrCanvas.innerHTML = "";
-      }
-      if (wxQrWrap) {
-        wxQrWrap.hidden = true;
-      }
-    };
-
-    const renderWxQr = (url) => {
-      if (!url || !wxQrCanvas || !wxQrWrap) {
-        clearWxQr();
-        return;
-      }
-
-      wxQrCanvas.innerHTML = "";
-
-      if (typeof window.QRCode === "function") {
-        new window.QRCode(wxQrCanvas, {
-          text: url,
-          width: 220,
-          height: 220,
-          correctLevel: window.QRCode.CorrectLevel.M,
-        });
-      } else {
-        const img = document.createElement("img");
-        img.alt = "微信绑定二维码";
-        img.width = 220;
-        img.height = 220;
-        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}`;
-        wxQrCanvas.appendChild(img);
-      }
-
-      wxQrWrap.hidden = false;
-    };
-
-    const applyWeixinPayload = (weixin, fromRefresh = false) => {
-      if (!wxBindPanel || !wxBindCard || !registerEmptyCard) {
-        return;
-      }
-      if (!weixin) {
-        wxBindCard.hidden = true;
-        registerEmptyCard.hidden = false;
-        wxState.accountId = "";
-        clearWxQr();
-        return;
-      }
-
-      wxBindCard.hidden = false;
-      registerEmptyCard.hidden = true;
-
-      wxState.accountId = String(weixin.account_id || wxState.accountId || "");
-      wxRefreshBtn.disabled = !wxState.accountId;
-
-      if (!weixin.available) {
-        setWxStatus("检测失败", "error");
-        wxBindHint.textContent = weixin.error || "微信绑定状态检测失败，请稍后重试。";
-        clearWxQr();
-        return;
-      }
-
-      if (weixin.is_bind) {
-        setWxStatus("已绑定", "success");
-        wxBindHint.textContent = "当前账号已绑定微信。";
-        clearWxQr();
-        return;
-      }
-
-      setWxStatus("未绑定", "warning");
-      if (fromRefresh && weixin.qr_refreshed) {
-        wxBindHint.textContent = "仍未绑定，二维码已刷新，请重新扫码后点击刷新检测。";
-      } else {
-        wxBindHint.textContent = "请使用微信扫码绑定，绑定完成后点击刷新检测。";
-      }
-      renderWxQr(weixin.qr_url);
-    };
-
-    const refreshWeixinStatus = async () => {
-      if (!wxState.accountId) {
-        window.showMessage?.("error", "当前没有可刷新的绑定状态");
-        return;
-      }
-
-      const oldText = wxRefreshBtn.textContent;
-      wxRefreshBtn.disabled = true;
-      wxRefreshBtn.textContent = "刷新中...";
-      try {
-        const resp = await fetch("/register/weixin/refresh", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
-          },
-          body: JSON.stringify({ account_id: wxState.accountId }),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (resp.ok && data.ok) {
-          applyWeixinPayload(data.weixin, true);
-          if (!data.weixin?.available) {
-            window.showMessage?.("error", data.weixin?.error || "微信绑定状态检测失败");
-          } else if (data.weixin?.is_bind) {
-            window.showMessage?.("success", "微信已绑定");
-          } else {
-            window.showMessage?.("warning", "仍未绑定，已刷新二维码");
-          }
-          return;
-        }
-        window.showMessage?.("error", data.detail || data.message || "刷新失败");
-      } catch (err) {
-        window.showMessage?.("error", "网络异常，请稍后重试");
-      } finally {
-        wxRefreshBtn.textContent = oldText;
-        wxRefreshBtn.disabled = !wxState.accountId;
-      }
-    };
 
     const loadCaptcha = async () => {
       try {
@@ -301,24 +85,13 @@
       loadCaptcha();
     });
 
-    togglePasswordBtn?.addEventListener("click", () => {
-      accountState.showPlain = !accountState.showPlain;
-      renderPassword();
-    });
-
-    wxRefreshBtn?.addEventListener("click", (event) => {
-      event.preventDefault();
-      refreshWeixinStatus();
-    });
-
-    loadCaptcha();
-
     form?.addEventListener("submit", async (event) => {
       event.preventDefault();
       const email = form.querySelector("#regEmail")?.value.trim();
       const password = form.querySelector("#regPassword")?.value.trim();
       const code = form.querySelector("#regCaptchaCode")?.value.trim();
       const key = captchaKeyInput?.value;
+
       if (!email) {
         window.showMessage?.("error", "请输入邮箱");
         return;
@@ -328,7 +101,7 @@
         return;
       }
       if (password.length < 8) {
-        window.showMessage?.("error", "密码长度至少8位");
+        window.showMessage?.("error", "密码长度至少 8 位");
         return;
       }
       if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
@@ -357,18 +130,13 @@
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
           window.showMessage?.("success", "注册成功");
-          showRegisterResult(email, password);
-          wxState.accountId = String(data.account_id || "");
-          form.reset();
-          loadCaptcha();
-          applyWeixinPayload(data.weixin || {
-            available: false,
-            account_id: wxState.accountId,
-            error: "微信绑定状态初始化失败，请点击刷新重试",
-          }, false);
-          if (data.weixin?.available && !data.weixin?.is_bind) {
-            window.showMessage?.("warning", "微信未绑定，请扫码绑定后点击刷新");
+          if (data.session_error) {
+            window.showMessage?.("warning", `注册会话初始化提示：${data.session_error}`);
           }
+          const target = data.redirect || "/accounts/new";
+          window.setTimeout(() => {
+            window.location.href = target;
+          }, 350);
           return;
         }
 
@@ -383,6 +151,8 @@
         submitBtn.textContent = "注册";
       }
     });
+
+    loadCaptcha();
   })();
 </script>
 {% endblock %}
