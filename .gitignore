@@ -4,3 +4,4 @@ CLAUDE.md
 *.db
 app/__pycache__/
 mimotion/util/__pycache__/
+.venv/

@@ -811,8 +811,9 @@ def _build_register_session_snapshot(
     username: str,
     password: str,
     preferred_access_token: str | None = None,
+    proxy: str | None = None,
 ) -> dict:
-    from util.zepp_helper import grant_login_tokens, login_access_token
+    from util.zepp_helper import grant_login_tokens, grant_register_tokens, login_access_token
 
     login_user, is_phone = _normalize_zepp_login_user(username)
     zepp_device_id = str(uuid.uuid4())
@@ -824,13 +825,31 @@ def _build_register_session_snapshot(
     token_last_error = None
 
     if access_token:
-        login_token_new, app_token_new, user_id_new, token_err = grant_login_tokens(access_token, zepp_device_id, is_phone)
+        login_token_new, app_token_new, user_id_new, token_err = grant_register_tokens(
+            access_token,
+            zepp_device_id,
+            proxy=proxy,
+        )
         if login_token_new and app_token_new and user_id_new:
             login_token = login_token_new
             app_token = app_token_new
             zepp_user_id = str(user_id_new)
         else:
-            token_last_error = token_err or "客户端登录失败"
+            token_last_error = token_err or "client register failed"
+
+        if not (login_token and app_token and zepp_user_id):
+            login_token_new, app_token_new, user_id_new, token_err = grant_login_tokens(
+                access_token,
+                zepp_device_id,
+                is_phone,
+            )
+            if login_token_new and app_token_new and user_id_new:
+                login_token = login_token_new
+                app_token = app_token_new
+                zepp_user_id = str(user_id_new)
+                token_last_error = None
+            else:
+                token_last_error = token_err or token_last_error or "client login failed"
 
     if not (login_token and app_token and zepp_user_id):
         access_token_new, login_err = login_access_token(login_user, password)
@@ -1119,6 +1138,7 @@ async def register_post(request: Request):
         username=email,
         password=password,
         preferred_access_token=access_token,
+        proxy=_get_register_proxy(),
     )
     session_error = session_snapshot.get("token_last_error")
     _persist_account_session_state(

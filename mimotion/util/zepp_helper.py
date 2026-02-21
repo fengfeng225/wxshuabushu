@@ -25,6 +25,7 @@ _APP_CHANNEL = "Normal"
 _APP_COUNTRY = "CN"
 _APP_LANG = "zh_CN"
 _APP_TIMEZONE = "Asia/Shanghai"
+_APP_DN = "account.zepp.com,api-user.zepp.com,api-mifit.zepp.com,api-watch.zepp.com,app-analytics.zepp.com,api-analytics.huami.com,auth.zepp.com"
 _WEIXIN_THIRD_PARTY_ID = "ZrfPEFPl-6W_BwEAkMAgaWQAAAZxVb_HP"
 
 _RETRYABLE_EXCEPTIONS = (request_exceptions.ConnectionError, request_exceptions.Timeout)
@@ -145,6 +146,89 @@ def register_account(email, password, captcha_code, captcha_key, proxy=None) -> 
         return None, f"注册异常：{traceback.format_exc()}"
 
     return access_token, None
+
+
+def _split_app_cv(cv: str) -> tuple[str, str | None]:
+    if not cv:
+        return cv, None
+    if "_" not in cv:
+        return cv, None
+    build, version = cv.split("_", 1)
+    return version, build
+
+
+def grant_register_tokens(
+    access_token: str,
+    device_id: str,
+    proxy=None,
+) -> (str | None, str | None, str | None, str | None):
+    if not access_token:
+        return None, None, None, "access_token is empty"
+    if not device_id:
+        return None, None, None, "device_id is empty"
+
+    app_version, build_code = _split_app_cv(_APP_CV)
+    source = f"{_APP_NAME}:{app_version}:{build_code}" if build_code else f"{_APP_NAME}:{app_version}"
+
+    data = {
+        "app_name": _APP_NAME,
+        "country_code": _APP_COUNTRY,
+        "code": access_token,
+        "device_id": device_id,
+        "device_model": "android_phone",
+        "app_version": app_version,
+        "recommend_countries": _APP_COUNTRY,
+        "grant_type": "access_token",
+        "dn": _APP_DN,
+        "third_name": "huami",
+        "source": source,
+        "lang": "zh",
+    }
+
+    headers = dict(_REGISTER_HEADERS)
+    headers["x-request-id"] = str(uuid.uuid4())
+
+    url = "https://account.zepp.com/v1/client/register"
+    kwargs = {"data": data, "headers": headers}
+    if proxy:
+        kwargs["proxies"] = {"http": proxy, "https": proxy}
+
+    response = _request_with_retry("post", url, **kwargs)
+    try:
+        resp = response.json()
+    except Exception:
+        body_preview = (response.text or "").strip()[:300]
+        return None, None, None, (
+            f"client register failed: non-JSON response (http={response.status_code}, body={body_preview or 'empty'})"
+        )
+
+    if not isinstance(resp, dict):
+        return None, None, None, f"client register failed: invalid response type ({type(resp).__name__})"
+
+    result = resp.get("result")
+    token_info = resp.get("token_info") if isinstance(resp.get("token_info"), dict) else {}
+    login_token = token_info.get("login_token")
+    app_token = token_info.get("app_token")
+    user_id = token_info.get("user_id")
+
+    if result == "ok" and login_token and app_token and user_id:
+        return login_token, app_token, str(user_id), None
+
+    details = []
+    if result is not None:
+        details.append(f"result={result}")
+    code = resp.get("code")
+    if code is not None:
+        details.append(f"code={code}")
+    message = resp.get("message") or resp.get("msg") or resp.get("description")
+    if message:
+        details.append(f"message={message}")
+    missing_keys = [k for k in ("login_token", "app_token", "user_id") if not token_info.get(k)]
+    if missing_keys:
+        details.append("token_info_missing=" + ",".join(missing_keys))
+    if not details:
+        details.append(json.dumps(resp, ensure_ascii=False)[:300])
+    return None, None, None, "client register failed: " + " | ".join(details)
 
 
 def _request_with_retry(method, url, **kwargs):
