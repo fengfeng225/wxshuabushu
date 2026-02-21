@@ -2,6 +2,5 @@ AGENTS.md
 CLAUDE.md
 .env
 *.db
-app/__pycache__/
-mimotion/util/__pycache__/
+__pycache__/
 .venv/

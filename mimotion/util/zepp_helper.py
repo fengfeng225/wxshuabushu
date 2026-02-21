@@ -11,7 +11,7 @@ import pytz
 import requests
 from requests import exceptions as request_exceptions
 
-from util.aes_help import encrypt_data, HM_AES_KEY, HM_AES_IV
+from util.aes_help import decrypt_data, encrypt_data, HM_AES_KEY, HM_AES_IV
 
 REQUEST_TIMEOUT = (5, 15)
 REQUEST_RETRIES = 3
@@ -185,48 +185,60 @@ def grant_register_tokens(
         "lang": "zh",
     }
 
+    query = urllib.parse.urlencode(data, doseq=True)
+    cipher_data = encrypt_data(query.encode("utf-8"), HM_AES_KEY, HM_AES_IV)
+
     headers = dict(_REGISTER_HEADERS)
     headers["x-request-id"] = str(uuid.uuid4())
 
     url = "https://account.zepp.com/v1/client/register"
-    kwargs = {"data": data, "headers": headers}
+    kwargs = {"data": cipher_data, "headers": headers}
     if proxy:
         kwargs["proxies"] = {"http": proxy, "https": proxy}
 
     response = _request_with_retry("post", url, **kwargs)
+
+    resp = None
+    parse_error = None
     try:
         resp = response.json()
-    except Exception:
-        body_preview = (response.text or "").strip()[:300]
-        return None, None, None, (
-            f"client register failed: non-JSON response (http={response.status_code}, body={body_preview or 'empty'})"
-        )
+    except Exception as exc:
+        parse_error = exc
+
+    if not isinstance(resp, dict):
+        try:
+            decrypted = decrypt_data(response.content, HM_AES_KEY, HM_AES_IV)
+            resp = json.loads(decrypted.decode("utf-8", errors="replace"))
+        except Exception:
+            body_preview = (response.text or "").strip()[:300]
+            return None, None, None, (
+                f"client register failed: cannot parse response (http={response.status_code}, "
+                f"body={body_preview or 'empty'}, parse_error={parse_error})"
+            )
 
     if not isinstance(resp, dict):
         return None, None, None, f"client register failed: invalid response type ({type(resp).__name__})"
 
-    result = resp.get("result")
     token_info = resp.get("token_info") if isinstance(resp.get("token_info"), dict) else {}
     login_token = token_info.get("login_token")
     app_token = token_info.get("app_token")
     user_id = token_info.get("user_id")
 
-    if result == "ok" and login_token and app_token and user_id:
+    if login_token and app_token and user_id:
         return login_token, app_token, str(user_id), None
 
-    details = []
-    if result is not None:
-        details.append(f"result={result}")
-    code = resp.get("code")
-    if code is not None:
-        details.append(f"code={code}")
+    details = [f"http={response.status_code}"]
+    for key in ("result", "resp_code", "resp_msg", "error_code", "code"):
+        value = resp.get(key)
+        if value is not None:
+            details.append(f"{key}={value}")
     message = resp.get("message") or resp.get("msg") or resp.get("description")
     if message:
         details.append(f"message={message}")
     missing_keys = [k for k in ("login_token", "app_token", "user_id") if not token_info.get(k)]
     if missing_keys:
         details.append("token_info_missing=" + ",".join(missing_keys))
-    if not details:
+    if len(details) == 1:
         details.append(json.dumps(resp, ensure_ascii=False)[:300])
     return None, None, None, "client register failed: " + " | ".join(details)
 
