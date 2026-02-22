@@ -315,6 +315,18 @@
       }
     };
 
+    const pageOffset = Number("{{ (page - 1) * per_page }}") || 0;
+    const renumberRows = () => {
+      const rows = table.querySelectorAll("tbody tr");
+      rows.forEach((row, index) => {
+        const cell = row.querySelector("td");
+        if (!cell) {
+          return;
+        }
+        cell.textContent = String(pageOffset + index + 1);
+      });
+    };
+
     const bindingMask = document.getElementById("bindingMask");
     const bindingTitle = document.getElementById("bindingTitle");
     const bindingStatusTag = document.getElementById("bindingStatusTag");
@@ -667,6 +679,7 @@
           const data = await resp.json().catch(() => ({}));
           if (resp.ok && data.ok) {
             row?.remove();
+            renumberRows();
             updateStat("stat-total", -1);
             updateStat(wasEnabled ? "stat-enabled" : "stat-disabled", -1);
             window.showMessage?.("success", data.message || `账号${name}删除成功`);

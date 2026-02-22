@@ -32,18 +32,20 @@ if _MIMOTION_DIR not in sys.path:
 
 
 def _build_config(
-    accounts,
+    account,
     settings,
     fixed_step=None,
     min_step_override=None,
     max_step_override=None,
     fixed_step_exact=False,
 ):
-    users = "#".join([acct["username"] for acct in accounts])
-    passwords = "#".join([decrypt_text(acct["password_enc"]) for acct in accounts])
+    account = account or {}
+    username = account.get("username") or ""
+    password_enc = account.get("password_enc") or ""
+    password = decrypt_text(password_enc) if password_enc else ""
     config = {
-        "USER": users,
-        "PWD": passwords,
+        "USER": username,
+        "PWD": password,
         "MIN_STEP": str(settings["min_step"]),
         "MAX_STEP": str(settings["max_step"]),
         "CRON_EXPRESSION": settings.get("cron_expression") or "",
@@ -54,7 +56,6 @@ def _build_config(
         "TELEGRAM_BOT_TOKEN": settings.get("telegram_bot_token") or "",
         "TELEGRAM_CHAT_ID": settings.get("telegram_chat_id") or "",
         "SLEEP_GAP": "0",
-        "USE_CONCURRENT": "False",
     }
     if min_step_override is not None:
         config["MIN_STEP"] = str(min_step_override)
@@ -68,7 +69,7 @@ def _build_config(
 
 
 def _build_env(
-    accounts,
+    account,
     settings,
     fixed_step=None,
     min_step_override=None,
@@ -76,7 +77,7 @@ def _build_env(
     fixed_step_exact=False,
 ):
     config = _build_config(
-        accounts,
+        account,
         settings,
         fixed_step,
         min_step_override,
@@ -89,12 +90,11 @@ def _build_env(
         env.pop("AES_KEY")
     # 从账号会话传递 token 缓存
     token_data = None
-    if accounts:
-        account_id = accounts[0].get("id")
-        if account_id:
-            session = get_account_session(account_id)
-            if session:
-                token_data = session.get("token_data")
+    account_id = (account or {}).get("id")
+    if account_id:
+        session = get_account_session(account_id)
+        if session:
+            token_data = session.get("token_data")
     if token_data:
         env["TOKEN_DATA"] = token_data
     elif "TOKEN_DATA" in env:
@@ -261,7 +261,7 @@ def _run_account(
             account, fixed_step, fixed_step_exact
         )
         env = _build_env(
-            [account],
+            account,
             settings,
             resolved_fixed,
             min_override,

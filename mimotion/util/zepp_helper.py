@@ -142,8 +142,8 @@ def register_account(email, password, captcha_code, captcha_key, proxy=None) -> 
         access_token = get_access_token(location)
         if access_token is None:
             return None, "注册成功但获取accessToken失败"
-    except:
-        return None, f"注册异常：{traceback.format_exc()}"
+    except Exception as exc:
+        return None, f"注册异常：{exc}"
 
     return access_token, None
 
@@ -283,7 +283,7 @@ def _build_mifit_headers(app_token: str) -> dict[str, str]:
 def login_access_token(user, password) -> (str | None, str | None):
     headers = {
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "user-agent": "MiFit6.14.0 (M2007J1SC; Android 12; Density/2.75)",
+        "user-agent": _APP_USER_AGENT,
         "app_name": _APP_NAME,
         "appname": _APP_NAME,
         "appplatform": "android_phone",
@@ -314,8 +314,8 @@ def login_access_token(user, password) -> (str | None, str | None):
         code = get_access_token(location)
         if code is None:
             return None, "获取accessToken失败 %s" % get_error_code(location)
-    except:
-        return None, f"获取accessToken异常:{traceback.format_exc()}"
+    except Exception as exc:
+        return None, f"获取accessToken异常:{exc}"
     return code, None
 
 
@@ -356,13 +356,15 @@ def get_time():
 
 # 获取login_token，app_token，userid
 def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, str | None, str | None, str | None):
+    app_version, build_code = _split_app_cv(_APP_CV)
+    source = f"{_APP_NAME}:{app_version}:{build_code}" if build_code else f"{_APP_NAME}:{app_version}"
     url = "https://account.huami.com/v2/client/login"
     headers = {
         "app_name": _APP_NAME,
         "x-request-id": f"{str(uuid.uuid4())}",
         "accept-language": "zh-CN",
         "appname": _APP_NAME,
-        "cv": "50818_6.14.0",
+        "cv": _APP_CV,
         "v": "2.0",
         "appplatform": "android_phone",
         "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -370,9 +372,9 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
     if is_phone:
         data = {
             "app_name": _APP_NAME,
-            "app_version": "6.14.0",
+            "app_version": app_version,
             "code": access_token,
-            "country_code": "CN",
+            "country_code": _APP_COUNTRY,
             "device_id": device_id,
             "device_model": "phone",
             "grant_type": "access_token",
@@ -382,16 +384,16 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
         data = {
             "allow_registration=": "false",
             "app_name": _APP_NAME,
-            "app_version": "6.14.0",
+            "app_version": app_version,
             "code": access_token,
-            "country_code": "CN",
+            "country_code": _APP_COUNTRY,
             "device_id": device_id,
             "device_model": "android_phone",
-            "dn": "account.zepp.com,api-user.zepp.com,api-mifit.zepp.com,api-watch.zepp.com,app-analytics.zepp.com,api-analytics.huami.com,auth.zepp.com",
+            "dn": _APP_DN,
             "grant_type": "access_token",
-            "lang": "zh_CN",
+            "lang": _APP_LANG,
             "os_version": "1.5.0",
-            "source": "com.xiaomi.hm.health:6.14.0:50818",
+            "source": source,
             "third_name": "email",
         }
     response = _request_with_retry("post", url, data=data, headers=headers)
@@ -399,10 +401,10 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
         resp = response.json()
     except Exception:
         body_preview = (response.text or "").strip()[:300]
-        return None, None, None, f"客户端登录失败：非 JSON 响应（http={response.status_code}, body={body_preview or 'empty'}）"
+        return None, None, None, f"Client login failed: non-JSON response (http={response.status_code}, body={body_preview or 'empty'})"
 
     if not isinstance(resp, dict):
-        return None, None, None, f"客户端登录失败：响应格式异常（{type(resp).__name__}）"
+        return None, None, None, f"Client login failed: invalid response type ({type(resp).__name__})"
 
     result = resp.get("result")
     token_info = resp.get("token_info") if isinstance(resp.get("token_info"), dict) else {}
@@ -424,67 +426,66 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
         details.append(f"message={message}")
     missing_keys = [k for k in ("login_token", "app_token", "user_id") if not token_info.get(k)]
     if missing_keys:
-        details.append("token_info缺少=" + ",".join(missing_keys))
+        details.append("token_info missing=" + ",".join(missing_keys))
     if not details:
         details.append(json.dumps(resp, ensure_ascii=False)[:300])
-    return None, None, None, "客户端登录失败：" + " | ".join(details)
+    return None, None, None, "Client login failed: " + " | ".join(details)
 
 
-# 获取app_token 用于提交数据变更
 def grant_app_token(login_token: str) -> (str | None, str | None):
-    url = f"https://account-cn.huami.com/v1/client/app_tokens?app_name=com.xiaomi.hm.health&dn=api-user.huami.com%2Capi-mifit.huami.com%2Capp-analytics.huami.com&login_token={login_token}"
-    headers = {'User-Agent': 'MiFit/5.3.0 (iPhone; iOS 14.7.1; Scale/3.00)'}
+    encoded_dn = urllib.parse.quote(_APP_DN, safe="")
+    url = f"https://account-cn.huami.com/v1/client/app_tokens?app_name={_APP_NAME}&dn={encoded_dn}&login_token={login_token}"
+    headers = {"User-Agent": _APP_USER_AGENT}
     resp = _request_with_retry("get", url, headers=headers)
     if resp.status_code != 200:
-        return None, "请求异常：%d" % resp.status_code
+        return None, "request failed: %d" % resp.status_code
     resp = resp.json()
 
     result = resp.get("result")
     if result != "ok":
         error_code = resp.get("error_code")
-        return None, "请求失败：%s" % error_code
+        return None, "request failed: %s" % error_code
     app_token = resp['token_info']['app_token']
     return app_token, None
 
 
-# 获取用户信息 主要用于检查app_token是否有效
 def check_app_token(app_token) -> (bool, str | None):
     url = "https://api-mifit-cn3.zepp.com/huami.health.getUserInfo.json"
 
     params = {
         "r": "00b7912b-790a-4552-81b1-3742f9dd1e76",
         "userid": "1188760659",
-        "appid": "428135909242707968",
-        "channel": "Normal",
-        "country": "CN",
-        "cv": "50818_6.14.0",
+        "appid": _APP_CLIENT_ID,
+        "channel": _APP_CHANNEL,
+        "country": _APP_COUNTRY,
+        "cv": _APP_CV,
         "device": "android_31",
         "device_type": "android_phone",
-        "lang": "zh_CN",
-        "timezone": "Asia/Shanghai",
+        "lang": _APP_LANG,
+        "timezone": _APP_TIMEZONE,
         "v": "2.0"
     }
 
     headers = {
-        "User-Agent": "MiFit6.14.0 (M2007J1SC; Android 12; Density/2.75)",
+        "User-Agent": _APP_USER_AGENT,
         "Accept-Encoding": "gzip",
         "hm-privacy-diagnostics": "false",
-        "country": "CN",
+        "country": _APP_COUNTRY,
         "appplatform": "android_phone",
         "hm-privacy-ceip": "true",
         "x-request-id": str(uuid.uuid4()),
-        "timezone": "Asia/Shanghai",
-        "channel": "Normal",
-        "cv": "50818_6.14.0",
+        "timezone": _APP_TIMEZONE,
+        "channel": _APP_CHANNEL,
+        "cv": _APP_CV,
         "appname": _APP_NAME,
         "v": "2.0",
         "apptoken": app_token,
-        "lang": "zh_CN",
-        "clientid": "428135909242707968"
+        "lang": _APP_LANG,
+        "clientid": _APP_CLIENT_ID
     }
     response = _request_with_retry("get", url, params=params, headers=headers)
     if response.status_code != 200:
-        return False, "请求异常：%d" % response.status_code
+        return False, "request failed: %d" % response.status_code
     response = response.json()
     message = response["message"]
     if message == "success":
@@ -561,35 +562,37 @@ def get_weixin_bind_qr_url(
 
 
 def renew_login_token(login_token) -> (str | None, str | None):
+    app_version, build_code = _split_app_cv(_APP_CV)
+    source = f"{_APP_NAME}:{app_version}:{build_code}" if build_code else f"{_APP_NAME}:{app_version}"
     url = "https://account-cn3.zepp.com/v1/client/renew_login_token"
     params = {
         "os_version": "v0.8.1",
-        "dn": "account.zepp.com,api-user.zepp.com,api-mifit.zepp.com,api-watch.zepp.com,app-analytics.zepp.com,api-analytics.huami.com,auth.zepp.com",
+        "dn": _APP_DN,
         "login_token": login_token,
-        "source": "com.xiaomi.hm.health:6.14.0:50818",
+        "source": source,
         "timestamp": get_time()
     }
     headers = {
-        "User-Agent": "MiFit6.14.0 (M2007J1SC; Android 12; Density/2.75)",
+        "User-Agent": _APP_USER_AGENT,
         "Accept-Encoding": "gzip",
         "app_name": _APP_NAME,
         "hm-privacy-ceip": "false",
         "x-request-id": str(uuid.uuid4()),
         "accept-language": "zh-CN",
         "appname": _APP_NAME,
-        "cv": "50818_6.14.0",
+        "cv": _APP_CV,
         "v": "2.0",
         "appplatform": "android_phone"
     }
 
     resp = _request_with_retry("get", url, params=params, headers=headers)
     if resp.status_code != 200:
-        return None, "请求异常：%d" % resp.status_code
+        return None, "request failed: %d" % resp.status_code
     resp = resp.json()
     result = resp["result"]
 
     if result != "ok":
-        return None, "请求失败：%s" % result
+        return None, "request failed: %s" % result
     login_token = resp["token_info"]["login_token"]
     return login_token, None
 

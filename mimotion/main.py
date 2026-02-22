@@ -122,6 +122,10 @@ def get_time_rate(hour=None, minute=None):
 def get_min_max_config():
     min_step = get_int_value_default(config, 'MIN_STEP', 18000)
     max_step = get_int_value_default(config, 'MAX_STEP', 25000)
+    min_step = max(0, min(99999, min_step))
+    max_step = max(0, min(99999, max_step))
+    if min_step > max_step:
+        min_step, max_step = max_step, min_step
     return min_step, max_step
 
 
@@ -132,8 +136,7 @@ def get_min_max_by_time(hour=None, minute=None):
     if minute is None:
         minute = time_bj.minute
     time_rate = get_time_rate(hour, minute)
-    min_step = get_int_value_default(config, 'MIN_STEP', 18000)
-    max_step = get_int_value_default(config, 'MAX_STEP', 25000)
+    min_step, max_step = get_min_max_config()
     return int(time_rate * min_step), int(time_rate * max_step)
 
 
@@ -222,6 +225,10 @@ def _calc_curve_step(user, min_step, max_step, hour, minute):
     high = int(round(target * f1))
     if low > high:
         low, high = high, low
+    low = max(min_step, low)
+    high = min(max_step, high)
+    if low > high:
+        low = high = min_step
     step_value = random.randint(low, high)
     return step_value, {
         "target": target,
@@ -392,15 +399,23 @@ class MiMotionRunner:
                 step_value = int(fixed_step * get_time_rate())
                 if step_value < 1:
                     step_value = 1
+            bounded_step = max(min_step, min(max_step, step_value))
+            if bounded_step != step_value:
+                self.log_str += f"\u6b65\u6570\u8d85\u51fa\u8303\u56f4\uff0c\u5df2\u4fee\u6b63\u4e3a{bounded_step}\n"
+            step_value = bounded_step
             step = str(step_value)
-            self.log_str += f"已设置为固定步数{step}\n"
+            self.log_str += f"\u5df2\u8bbe\u7f6e\u4e3a\u56fa\u5b9a\u6b65\u6570{step}\n"
         else:
             step_value, meta = _calc_curve_step(self.user, min_step, max_step, time_bj.hour, time_bj.minute)
+            bounded_step = max(min_step, min(max_step, step_value))
+            if bounded_step != step_value:
+                self.log_str += f"\u6b65\u6570\u8d85\u51fa\u8303\u56f4\uff0c\u5df2\u4fee\u6b63\u4e3a{bounded_step}\n"
+            step_value = bounded_step
             step = str(step_value)
             self.log_str += (
-                f"已设置为曲线步数目标({meta['target']}) "
-                f"槽位({meta['slot_index'] + 1}/{meta['slot_total']}) "
-                f"区间({meta['low']}~{meta['high']}) 值:{step}\n"
+                f"\u5df2\u8bbe\u7f6e\u4e3a\u66f2\u7ebf\u6b65\u6570\u76ee\u6807({meta['target']}) "
+                f"\u69fd\u4f4d({meta['slot_index'] + 1}/{meta['slot_total']}) "
+                f"\u533a\u95f4({meta['low']}~{meta['high']}) \u503c:{step}\n"
             )
         ok, msg = zeppHelper.post_fake_brand_data(step, app_token, self.user_id)
         return f"修改步数（{step}）[" + msg + "]", ok, step
@@ -419,76 +434,52 @@ def run_single_account(total, idx, user_mi, passwd_mi):
         log_str += f'{exec_msg}\n'
         exec_result = {"user": user_mi, "success": success,
                        "msg": exec_msg}
-    except:
+    except Exception as exc:
         log_str += f"执行异常:{traceback.format_exc()}\n"
-        log_str += traceback.format_exc()
         exec_result = {"user": user_mi, "success": False,
-                       "msg": f"执行异常:{traceback.format_exc()}"}
+                       "msg": f"执行异常:{exc}"}
     print(log_str)
     print(f"MM_RESULT|{user_mi}|{step or ''}|{1 if exec_result.get('success') else 0}")
     return exec_result
 
 
 def execute():
-    user_list = users.split('#')
-    passwd_list = passwords.split('#')
-    exec_results = []
-    if len(user_list) == len(passwd_list):
-        idx, total = 0, len(user_list)
-        if use_concurrent:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                exec_results = executor.map(lambda x: run_single_account(total, x[0], *x[1]),
-                                            enumerate(zip(user_list, passwd_list)))
-        else:
-            for user_mi, passwd_mi in zip(user_list, passwd_list):
-                exec_results.append(run_single_account(total, idx, user_mi, passwd_mi))
-                idx += 1
-                if idx < total:
-                    # 每个账号之间间隔一定时间请求一次，避免接口请求过于频繁导致异常
-                    time.sleep(sleep_seconds)
-        if encrypt_support:
-            persist_user_tokens()
-        success_count = 0
-        push_results = []
-        for result in exec_results:
-            push_results.append(result)
-            if result['success'] is True:
-                success_count += 1
-        summary = f"\n执行账号总数{total}，成功：{success_count}，失败：{total - success_count}"
-        print(summary)
-        push_util.push_results(push_results, summary, push_config)
-    else:
-        print(f"账号数长度[{len(user_list)}]和密码数长度[{len(passwd_list)}]不匹配，跳过执行")
+    user_value = str(users or "").strip()
+    passwd_value = str(passwords or "")
+    if not user_value or passwd_value == "":
+        print("Missing account or password, skip execution")
         exit(1)
 
+    exec_results = [run_single_account(1, 0, user_value, passwd_value)]
+    if encrypt_support:
+        persist_user_tokens()
+
+    success_count = 0
+    push_results = []
+    for result in exec_results:
+        push_results.append(result)
+        if result['success'] is True:
+            success_count += 1
+
+    total = len(exec_results)
+    summary = f"\nAccounts: {total}, success: {success_count}, failed: {total - success_count}"
+    print(summary)
+    push_util.push_results(push_results, summary, push_config)
 
 def prepare_user_tokens() -> dict:
-    # 优先从环境变量 TOKEN_DATA 读取（单账号 token，由父进程从数据库传入）
+    # Only read TOKEN_DATA from env (passed from parent process)
     token_data_env = os.environ.get("TOKEN_DATA")
-    if token_data_env:
-        try:
-            from util.aes_help import base64_to_bytes
-            cipher_bytes = base64_to_bytes(token_data_env)
-            decrypted_data = decrypt_data(cipher_bytes, aes_key, None)
-            return json.loads(decrypted_data.decode('utf-8', errors='strict'))
-        except:
-            print("TOKEN_DATA 解密失败，忽略缓存token")
-            return dict()
-    # 降级：从文件读取（兼容过渡期）
-    data_path = r"encrypted_tokens.data"
-    if os.path.exists(data_path):
-        with open(data_path, 'rb') as f:
-            data = f.read()
-        try:
-            decrypted_data = decrypt_data(data, aes_key, None)
-            return json.loads(decrypted_data.decode('utf-8', errors='strict'))
-        except:
-            print("密钥不正确或者加密内容损坏 放弃token")
-            return dict()
-    else:
+    if not token_data_env:
         return dict()
 
+    try:
+        from util.aes_help import base64_to_bytes
+        cipher_bytes = base64_to_bytes(token_data_env)
+        decrypted_data = decrypt_data(cipher_bytes, aes_key, None)
+        return json.loads(decrypted_data.decode('utf-8', errors='strict'))
+    except Exception as exc:
+        print(f"TOKEN_DATA decrypt failed, ignore cached token: {exc}")
+        return dict()
 
 def persist_user_tokens():
     # 输出到 stdout，由父进程 run_once.py 解析并回写数据库
@@ -521,11 +512,10 @@ if __name__ == "__main__":
         config = dict()
         try:
             config = dict(json.loads(os.environ.get("CONFIG")))
-        except:
-            print("CONFIG格式不正确，请检查Secret配置，请严格按照JSON格式：使用双引号包裹字段和值，逗号不能多也不能少")
+        except Exception as exc:
+            print(f"Invalid CONFIG JSON: {exc}")
             traceback.print_exc()
             exit(1)
-        # 创建推送配置对象
         push_config = push_util.PushConfig(
             push_plus_token=config.get('PUSH_PLUS_TOKEN'),
             push_plus_hour=config.get('PUSH_PLUS_HOUR'),
@@ -549,7 +539,7 @@ if __name__ == "__main__":
         fixed_value = config.get('FIXED_STEP')
         try:
             fixed_value = int(fixed_value)
-        except:
+        except Exception:
             fixed_value = None
         fixed_step_exact = str(config.get('FIXED_STEP_EXACT') or '') == '1'
         if fixed_value is None or fixed_value < 0 or fixed_value > 99999:
@@ -558,10 +548,5 @@ if __name__ == "__main__":
         else:
             fixed_step = fixed_value
         min_step, max_step = get_min_max_config()
-        use_concurrent = config.get('USE_CONCURRENT')
-        if use_concurrent is not None and use_concurrent == 'True':
-            use_concurrent = True
-        else:
-            use_concurrent = False
         # endregion
         execute()

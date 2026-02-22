@@ -1,173 +1,119 @@
-# Mimotion Manager
+# MiMotion Manager
 
-基于 Docker 自部署的小米运动（Zepp Life）步数管理系统，提供 Web 管理界面，支持多账号批量管理、定时自动执行、消息推送通知。
+小米运动（Zepp Life）步数管理系统。Docker 自部署，Web 管理后台，支持多账号批量刷步、定时执行、消息推送。
 
-核心刷步引擎 `mimotion/` 借鉴自 [TonyJiangWJ/mimotion](https://github.com/TonyJiangWJ/mimotion)，在其基础上封装了完整的 Web 管理后台和 Docker 部署方案。
+核心刷步引擎基于 [TonyJiangWJ/mimotion](https://github.com/TonyJiangWJ/mimotion)。
 
 ## 功能特性
 
-- **多账号管理** - 支持批量添加、编辑、启用/停用账号，密码加密存储
-- **自动刷步** - 通过 Zepp Life（华米）API 提交步数数据
-- **定时执行** - 配合 cron 定时任务自动运行，支持随机延迟分散执行
-- **步数配置** - 全局步数范围 + 账号级覆盖 + 固定步数，灵活配置
-- **Token 缓存** - 多级 Token 缓存策略（app_token > login_token > access_token），减少登录频率
-- **消息推送** - 支持 PushPlus（微信）、企业微信 WebHook、Telegram Bot
-- **执行记录** - 完整的执行日志，含今日统计和时间线视图
-- **安全设计** - 账号密码 Fernet 加密存储，Token AES 加密持久化，管理后台登录鉴权
-
-## 技术栈
-
-| 层级     | 技术                                  |
-| -------- | ------------------------------------- |
-| Web 框架 | FastAPI + Uvicorn                     |
-| 模板引擎 | Jinja2（服务端渲染）                  |
-| 数据库   | SQLite                                |
-| 加密     | Fernet（密码） + AES-128-CBC（Token） |
-| 部署     | Docker + Docker Compose               |
-| 运行时   | Python 3.11                           |
+- **多账号管理** - 添加/编辑/删除/启停账号，支持账号过期自动停用
+- **智能步数曲线** - 基于日期 + 用户名的确定性种子，每天生成固定目标步数；5 种曲线模型（linear / ease-in / ease-out / smoothstep / slow-flat-fast）模拟真实运动轨迹
+- **定时执行** - Cron 表达式配置，随机延迟分散请求，避免集中触发
+- **账号注册** - 内置 Zepp 账号注册流程，含验证码获取与微信、支付宝绑定
+- **Token 缓存** - 三级降级（app_token > login_token > access_token），AES 加密存储，减少登录请求
+- **消息推送** - 支持 PushPlus / 企业微信 / Telegram
+- **执行日志** - 完整记录每次执行的账号、步数、状态、输出，支持筛选和分页
+- **Web 管理后台** - Bento Grid 风格 UI，响应式布局，Jinja2 服务端渲染
 
 ## 快速开始
 
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/fengfeng225/wxshuabushu
-cd mimotion-manager
-```
-
-### 2. 配置环境变量
+### 1. 准备配置
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，修改以下配置：
+编辑 `.env`，至少修改以下项：
 
 ```env
-APP_SECRET=your-secret-key        # 应用密钥，用于 Session 签名和密码加密
-ADMIN_USER=admin                  # 管理后台用户名
-ADMIN_PASS=your-admin-password    # 管理后台密码
-VIEW_PASSWORD_KEY=your-view-key   # 查看账号密码的二次验证密钥
-AES_KEY=                          # 16 字节 AES 密钥，用于 Token 持久化（留空则不缓存 Token）
+APP_SECRET=your-random-secret-string
+ADMIN_USER=admin
+ADMIN_PASS=your-admin-password
+VIEW_PASSWORD_KEY=your-view-key
 ```
 
-### 3. 启动服务
+### 2. Docker 部署（推荐）
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-服务启动后访问 `http://localhost:8000`，使用 `.env` 中配置的管理员账号登录。
+访问 `http://localhost:9091` 进入管理后台。
 
-### 4. 配置定时任务（可选）
-
-在宿主机添加 cron 定时任务，定时触发刷步：
+### 3. 本地开发
 
 ```bash
-# 每天 6点、8点、10点...20点 各执行一次
-0 6,8,10,12,14,16,18,20 * * * docker compose -f /path/to/docker-compose.yml exec -T mimotion env RUN_TRIGGER=cron python /app/run_once.py
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-多账号会在 `RANDOM_DELAY_MAX`（默认 58 分钟）范围内均匀分散执行，避免集中请求。
+## 环境变量
 
-## 项目结构
+| 变量                  | 必填 | 说明                             | 默认值                    |
+| --------------------- | ---- | -------------------------------- | ------------------------- |
+| `APP_SECRET`        | 是   | 应用密钥，用于 Session 加密      | -                         |
+| `ADMIN_USER`        | 是   | 管理后台用户名                   | `admin`                 |
+| `ADMIN_PASS`        | 是   | 管理后台密码                     | `admin`                 |
+| `VIEW_PASSWORD_KEY` | 是   | 查看账号密码时的验证密钥         | -                         |
+| `AES_KEY`           | 否   | 16 字节密钥，用于 Token 加密存储 | -                         |
+| `DATA_DIR`          | 否   | 数据存储目录                     | `/data`                 |
+| `MIMOTION_PATH`     | 否   | 刷步引擎脚本路径                 | `/app/mimotion/main.py` |
+| `RANDOM_DELAY_MAX`  | 否   | Cron 模式下随机延迟最大分钟数    | `58`                    |
+
+## 架构概览
 
 ```
 mimotion-manager/
-├── app/                    # Web 应用
-│   ├── main.py             # FastAPI 主应用（路由、中间件）
-│   ├── db.py               # SQLite 数据库操作层
-│   ├── crypto.py           # Fernet 加密/解密
-│   ├── step_api.py         # 第三方步数 API（来源：https://bs.yanwan.store/run4）
-│   ├── run_once.py         # 批量执行调度逻辑
-│   ├── static/             # 静态资源（CSS、图标）
-│   └── templates/          # Jinja2 HTML 模板
-├── mimotion/               # 核心刷步引擎
-│   ├── main.py             # 刷步主逻辑（登录、Token 管理、提交步数）
+├── app/                    # FastAPI Web 应用
+│   ├── main.py             # 路由、中间件、认证
+│   ├── db.py               # SQLite 数据层（accounts / settings / runs）
+│   ├── run_once.py         # 批量调度：账号遍历、延迟分散、子进程启动
+│   ├── crypto.py           # Fernet 加密（基于 APP_SECRET 派生）
+│   ├── step_api.py         # 第三方步数 API 客户端
+│   ├── templates/          # Jinja2 模板
+│   └── static/             # 静态资源
+├── mimotion/               # 刷步引擎（独立子进程）
+│   ├── main.py             # MiMotionRunner：登录、Token 管理、步数提交
 │   └── util/
+│       ├── zepp_helper.py  # Zepp/华米 API 封装（自动重试）
 │       ├── aes_help.py     # AES-128-CBC 加解密
-│       ├── zepp_helper.py  # Zepp/华米 API 交互
-│       └── push_util.py    # 消息推送（PushPlus/企业微信/Telegram）
-├── data/                   # 运行时数据（Docker 挂载卷）
-│   ├── mimotion.db         # SQLite 数据库
-│   └── encrypted_tokens.data  # 加密的 Token 缓存
-├── run_once.py             # 顶层执行入口
-├── Dockerfile
+│       └── push_util.py    # 消息推送
 ├── docker-compose.yml
-├── requirements.txt
+├── Dockerfile
 └── .env.example
 ```
 
-## 执行架构
+### 子进程通信
 
+`app/run_once.py` 通过 `subprocess.run` 启动 `mimotion/main.py`：
+
+- **输入**: `CONFIG` 环境变量（JSON）传递账号配置，`TOKEN_DATA` 传递缓存 Token
+- **输出**: stdout 中 `MM_RESULT|` 前缀行返回执行结果，`MM_TOKEN|` 前缀行返回更新后的 Token
+
+### 数据库
+
+SQLite，3 张表：
+
+- `accounts` - 账号及加密密码/Token
+- `settings` - 全局配置（单行，id=1）
+- `runs` - 执行记录
+
+迁移通过 `db.py` 中的 `_ensure_column` 启动时自动补列。
+
+## 手动触发
+
+```bash
+# 本地
+python run_once.py
+
+# Docker 容器内（cron 模式）
+docker compose exec -T mimotion env RUN_TRIGGER=cron python /app/run_once.py
 ```
-[cron 定时任务] 或 [Web 手动触发]
-        |
-        v
-  run_once.py (入口)
-        |
-        v
-  app/run_once.py (调度层)
-    - 读取数据库中的账号和设置
-    - 过滤过期账号，自动停用
-    - 构建分散调度计划
-    - 逐个账号以子进程执行
-        |
-        v
-  mimotion/main.py (刷步引擎，子进程)
-    - 多级 Token 缓存登录
-    - 向 Zepp Life API 提交步数
-    - 输出结果，推送通知
-        |
-        v
-  app/run_once.py (结果收集)
-    - 解析执行输出
-    - 更新数据库执行记录
-```
 
-## 使用说明
+## 技术栈
 
-### Web 管理界面
-
-- **首页** - 账号列表，支持搜索、分页、启用/停用、测试刷步
-- **新增账号** - 填写手机号和密码，支持设置固定步数或自定义步数范围
-- **系统设置** - 配置全局步数范围、执行策略、推送渠道
-- **执行记录** - 查看历史执行日志，含成功/失败统计
-
-### 步数配置优先级
-
-1. 账号固定步数（最高优先级）
-2. 账号级步数范围覆盖
-3. 全局步数范围（默认 18000-25000）
-
-### 消息推送
-
-在系统设置中配置推送渠道，执行完成后自动发送结果通知：
-
-| 渠道     | 配置项              |
-| -------- | ------------------- |
-| PushPlus | Token               |
-| 企业微信 | WebHook URL         |
-| Telegram | Bot Token + Chat ID |
-
-## 环境变量说明
-
-| 变量                  | 必填 | 说明                                         |
-| --------------------- | ---- | -------------------------------------------- |
-| `APP_SECRET`        | 是   | 应用密钥，用于 Session 签名和 Fernet 加密    |
-| `ADMIN_USER`        | 是   | 管理后台用户名                               |
-| `ADMIN_PASS`        | 是   | 管理后台密码                                 |
-| `VIEW_PASSWORD_KEY` | 是   | 查看账号密码的二次验证密钥                   |
-| `AES_KEY`           | 否   | 16 字节密钥，用于 Token 持久化加密           |
-| `DATA_DIR`          | 否   | 数据目录路径，默认 `/data`                 |
-| `MIMOTION_PATH`     | 否   | 刷步引擎路径，默认 `/app/mimotion/main.py` |
-| `RANDOM_DELAY_MAX`  | 否   | cron 模式最大随机延迟（分钟），默认 `58`   |
+Python 3.11 / FastAPI / Uvicorn / SQLite / Jinja2 / Fernet + AES-128-CBC / Docker
 
 ## 致谢
 
-- [TonyJiangWJ/mimotion](https://github.com/TonyJiangWJ/mimotion) - 核心刷步引擎参考实现
-- [bs.yanwan.store](https://bs.yanwan.store/run4/) - 第三方步数接口
-
-## 免责声明
-
-本项目仅供学习交流使用，请勿用于商业用途。使用本项目产生的任何后果由使用者自行承担。
+- [TonyJiangWJ/mimotion](https://github.com/TonyJiangWJ/mimotion) - 核心刷步引擎
